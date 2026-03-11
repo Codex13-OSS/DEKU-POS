@@ -3,23 +3,30 @@ const connectionStatus = document.getElementById("connectionStatus");
 const BASE_URL = window.location.origin;
 
 let orders = [];
-const itemDoneState = new Map();
 let menuMap = new Map();
 let menuNameMap = new Map();
-
-function getItemDoneKey(orderId, itemIndex) {
-  return `${orderId}:${itemIndex}`;
-}
 
 function toggleItem(orderId, itemIndex) {
   const order = orders.find((entry) => entry.id === orderId);
   if (!order || !Array.isArray(order.items) || !order.items[itemIndex]) {
     return;
   }
-  const key = getItemDoneKey(orderId, itemIndex);
-  const next = !itemDoneState.get(key);
-  itemDoneState.set(key, next);
+
+  order.items[itemIndex].done = !order.items[itemIndex].done;
   renderOrders();
+}
+
+function mergeOrderItemsDone(previousOrder, nextOrder) {
+  if (!previousOrder || !Array.isArray(previousOrder.items) || !Array.isArray(nextOrder.items)) {
+    return nextOrder;
+  }
+
+  nextOrder.items = nextOrder.items.map((item, index) => ({
+    ...item,
+    done: previousOrder.items[index]?.done || false
+  }));
+
+  return nextOrder;
 }
 
 function isLocalhostHost(hostname) {
@@ -132,8 +139,7 @@ function renderOrders() {
     items.className = "order-items";
     order.items.forEach((item, itemIndex) => {
       const line = document.createElement("div");
-      const done = itemDoneState.get(getItemDoneKey(order.id, itemIndex));
-      line.className = `order-item${done ? " done" : ""}`;
+      line.className = `order-item${item.done ? " done" : ""}`;
       line.setAttribute("role", "button");
       line.tabIndex = 0;
       line.addEventListener("click", () => toggleItem(order.id, itemIndex));
@@ -146,7 +152,7 @@ function renderOrders() {
 
       const check = document.createElement("span");
       check.className = "check";
-      check.textContent = done ? "✔" : "⬜";
+      check.textContent = item.done ? "✔" : "⬜";
       line.appendChild(check);
 
       const imageSrc = getProductImage(item.productId);
@@ -235,7 +241,11 @@ function renderOrders() {
 
 async function fetchOrders() {
   const response = await apiGet("/api/orders");
-  orders = await response.json();
+  const incomingOrders = await response.json();
+  orders = incomingOrders.map((incomingOrder) => {
+    const existingOrder = orders.find((order) => order.id === incomingOrder.id);
+    return mergeOrderItemsDone(existingOrder, incomingOrder);
+  });
   renderOrders();
 }
 
@@ -271,11 +281,19 @@ function connectWebSocket() {
   socket.addEventListener("message", (event) => {
     const payload = JSON.parse(event.data);
     if (payload.event === "order:new") {
-      orders.push(payload.data);
+      const existingOrder = orders.find((order) => order.id === payload.data.id);
+      const nextOrder = mergeOrderItemsDone(existingOrder, payload.data);
+      orders = existingOrder
+        ? orders.map((order) => (order.id === nextOrder.id ? nextOrder : order))
+        : [...orders, nextOrder];
       renderOrders();
     }
     if (payload.event === "order:updated") {
-      orders = orders.map((order) => order.id === payload.data.id ? payload.data : order);
+      const existingOrder = orders.find((order) => order.id === payload.data.id);
+      const nextOrder = mergeOrderItemsDone(existingOrder, payload.data);
+      orders = orders.some((order) => order.id === payload.data.id)
+        ? orders.map((order) => (order.id === payload.data.id ? nextOrder : order))
+        : [...orders, nextOrder];
       renderOrders();
     }
   });
