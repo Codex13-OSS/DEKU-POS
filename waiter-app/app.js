@@ -1190,6 +1190,67 @@ function renderHistoryTicket(order) {
   historyTicket.appendChild(actions);
 }
 
+function renderPaymentPreviewTicket(order) {
+  if (!order) return;
+
+  cartItems.innerHTML = "";
+  const items = Array.isArray(order.items) ? order.items : [];
+
+  items.forEach((item) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "cart-item";
+
+    const header = document.createElement("div");
+    header.className = "cart-item-header";
+
+    const title = document.createElement("strong");
+    title.textContent = `${item.qty}x ${item.name}`;
+
+    const lineTotal = (item.qty || 0) * (item.unitPrice || 0);
+    const price = document.createElement("span");
+    price.textContent = formatPrice(lineTotal);
+
+    header.append(title, price);
+    wrapper.appendChild(header);
+
+    if (item.meta) {
+      const detail = document.createElement("small");
+      detail.textContent = buildRamenDetail(item.meta);
+      wrapper.appendChild(detail);
+    }
+
+    cartItems.appendChild(wrapper);
+  });
+
+  const subtotal = order.totals && typeof order.totals.subtotal === "number"
+    ? order.totals.subtotal
+    : calculateOrderTotal(order);
+  const total = calculateOrderTotal(order);
+  subtotalEl.textContent = formatPrice(subtotal);
+  totalEl.textContent = formatPrice(total);
+
+  const actions = document.createElement("div");
+  actions.className = "cart-item";
+
+  const confirmBtn = document.createElement("button");
+  confirmBtn.className = "primary";
+  confirmBtn.textContent = "CONFIRMAR PAGO";
+  confirmBtn.addEventListener("click", async () => {
+    await updateHistoryStatus(order.id, "paid");
+    await fetchHistoryOrders();
+    renderActivePanel();
+    renderCart();
+  });
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "ghost";
+  cancelBtn.textContent = "Cancelar";
+  cancelBtn.addEventListener("click", () => renderCart());
+
+  actions.append(confirmBtn, cancelBtn);
+  cartItems.appendChild(actions);
+}
+
 function getActivePanelOrders() {
   return historyOrders.filter((order) => ["pending", "preparing", "ready", "delivered"].includes(order.status));
 }
@@ -1259,11 +1320,7 @@ function renderActivePanel() {
         renderActivePanel();
       });
     } else if (order.status === "delivered") {
-      button.addEventListener("click", async () => {
-        await updateHistoryStatus(order.id, "paid");
-        await fetchHistoryOrders();
-        renderActivePanel();
-      });
+      button.addEventListener("click", () => renderPaymentPreviewTicket(order));
     } else {
       button.disabled = true;
     }
