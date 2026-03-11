@@ -54,6 +54,8 @@ const historyList = document.getElementById("historyList");
 const historyTicket = document.getElementById("historyTicket");
 const historyStatus = document.getElementById("historyStatus");
 const historyTable = document.getElementById("historyTable");
+const historyDate = document.getElementById("historyDate");
+const historyDailyTotal = document.getElementById("historyDailyTotal");
 
 let historyOrders = [];
 let activeHistoryOrderId = null;
@@ -966,9 +968,31 @@ function buildTableLabel(value) {
   return value === "PL" ? "Para llevar" : `Mesa ${value}`;
 }
 
+function getLocalDateKey(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getOrderDateKey(order) {
+  return getLocalDateKey(order.createdAt || order.timestamp || order.updatedAt);
+}
+
+function ensureHistoryDateDefault() {
+  if (!historyDate || historyDate.value) return;
+  historyDate.value = getLocalDateKey(new Date().toISOString());
+}
+
 function getFilteredHistoryOrders() {
   let filtered = [...historyOrders];
   const tableFilter = historyTable ? historyTable.value : "";
+  const dateFilter = historyDate ? historyDate.value : "";
   if (historyViewMode === "active") {
     filtered = filtered.filter((order) => ["pending", "preparing", "ready", "delivered"].includes(order.status));
   } else {
@@ -977,7 +1001,18 @@ function getFilteredHistoryOrders() {
   if (tableFilter) {
     filtered = filtered.filter((order) => order.table === tableFilter);
   }
+  if (dateFilter) {
+    filtered = filtered.filter((order) => getOrderDateKey(order) === dateFilter);
+  }
   return filtered;
+}
+
+function updateHistoryDailyTotal(orders) {
+  if (!historyDailyTotal) return;
+  const totalNode = historyDailyTotal.querySelector("strong");
+  if (!totalNode) return;
+  const total = orders.reduce((sum, order) => sum + calculateOrderTotal(order), 0);
+  totalNode.textContent = formatPrice(total);
 }
 
 function renderHistoryList(orders) {
@@ -989,15 +1024,16 @@ function renderHistoryList(orders) {
   }
   orders.forEach((order) => {
     const item = document.createElement("div");
-    item.className = "cart-item";
+    item.className = "cart-item history-order-card";
     const shortId = order.id.split("-").slice(-1)[0];
     const statusLabel = order.status.toUpperCase();
+    const orderTotal = calculateOrderTotal(order);
     item.innerHTML = `
       <div class="cart-item-header">
-        <strong>${shortId}</strong>
-        <span>${formatPrice(order.totals.total)}</span>
+        <strong>${buildTableLabel(order.table)}</strong>
+        <span>${formatPrice(orderTotal)}</span>
       </div>
-      <small>${formatTime(order.createdAt)} · ${buildTableLabel(order.table)} · ${statusLabel}</small>
+      <small>${formatTime(order.createdAt)} · ${statusLabel} · ${shortId}</small>
     `;
     if (historyViewMode === "active") {
       const actions = document.createElement("div");
@@ -1193,6 +1229,7 @@ function renderActivePanel() {
 async function openHistoryForOrder(orderId) {
   historyModal.classList.remove("hidden");
   try {
+    ensureHistoryDateDefault();
     await fetchHistoryOrders();
     refreshHistoryView();
     const current = historyOrders.find((order) => order.id === orderId);
@@ -1211,8 +1248,10 @@ async function fetchHistoryOrders() {
 }
 
 function refreshHistoryView() {
+  ensureHistoryDateDefault();
   const filtered = getFilteredHistoryOrders();
   renderHistoryList(filtered);
+  updateHistoryDailyTotal(filtered);
   renderActivePanel();
   if (activeHistoryOrderId) {
     const current = historyOrders.find((order) => order.id === activeHistoryOrderId);
@@ -1250,6 +1289,7 @@ function cancelHistoryOrder(orderId) {
 
 async function openHistoryModal() {
   historyModal.classList.remove("hidden");
+  ensureHistoryDateDefault();
   if (historyStatus && historyStatus.parentElement && !historyToggleButton) {
     historyToggleButton = document.createElement("button");
     historyToggleButton.className = "primary history-toggle";
@@ -1289,6 +1329,10 @@ if (historyStatus) {
 
 if (historyTable) {
   historyTable.addEventListener("change", refreshHistoryView);
+}
+
+if (historyDate) {
+  historyDate.addEventListener("change", refreshHistoryView);
 }
 
 if (promoToggle) {
