@@ -6,6 +6,7 @@ const state = {
   note: "",
   noteDraft: "",
   noteEditing: false,
+  appendOrderId: null,
   wizard: {
     open: false,
     step: 0,
@@ -826,6 +827,10 @@ function addRamenToCart() {
 }
 
 async function sendOrder() {
+  if (state.appendOrderId) {
+    return appendItemsToOrder();
+  }
+
   if (orderFlowStep === 0) {
     orderFlowStep = 1;
     state.activeCategory = "sides";
@@ -1187,6 +1192,14 @@ function renderHistoryTicket(order) {
     actions.appendChild(cancelBtn);
   }
 
+  if (["pending", "preparing", "ready", "delivered"].includes(order.status)) {
+    const appendBtn = document.createElement("button");
+    appendBtn.className = "ghost";
+    appendBtn.textContent = "AGREGAR PRODUCTOS";
+    appendBtn.addEventListener("click", () => startAppendOrder(order));
+    actions.appendChild(appendBtn);
+  }
+
   historyTicket.appendChild(actions);
 }
 
@@ -1249,6 +1262,65 @@ function renderPaymentPreviewTicket(order) {
 
   actions.append(confirmBtn, cancelBtn);
   cartItems.appendChild(actions);
+}
+
+function startAppendOrder(order) {
+  if (!order || !order.id) return;
+  state.appendOrderId = order.id;
+  state.cart = [];
+  state.note = "";
+  state.noteDraft = "";
+  state.noteEditing = false;
+  orderFlowStep = 2;
+  state.activeCategory = "sides";
+  closeHistoryModal();
+  renderCategories();
+  renderProducts();
+  renderCart();
+  updateOrderFlowUI();
+  setStatus(`Agregando productos a ${order.id.split("-").slice(-1)[0]}.`);
+}
+
+async function appendItemsToOrder() {
+  if (!state.appendOrderId) return;
+  if (!state.cart.length) {
+    return setStatus("Agrega productos antes de confirmar.");
+  }
+  if (state.cart.some((item) => item.meta && item.meta.size)) {
+    return setStatus("En esta versión solo puedes agregar entradas y bebidas.");
+  }
+
+  const items = state.cart.map((item) => ({
+    productId: item.productId,
+    name: item.name,
+    qty: item.qty,
+    basePrice: typeof item.basePrice === "number" ? item.basePrice : item.unitPrice,
+    unitPrice: item.unitPrice,
+    meta: item.meta || {}
+  }));
+
+  try {
+    const response = await fetch(apiUrl(`/api/orders/${state.appendOrderId}/items`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items })
+    });
+    if (!response.ok) {
+      throw new Error("No se pudo agregar productos");
+    }
+    state.cart = [];
+    state.appendOrderId = null;
+    orderFlowStep = 0;
+    renderCart();
+    renderProducts();
+    updateOrderFlowUI();
+    await fetchHistoryOrders();
+    renderActivePanel();
+    setStatus("Productos agregados a la comanda.");
+  } catch (error) {
+    console.error(error);
+    setStatus("No se pudo agregar productos.");
+  }
 }
 
 function getActivePanelOrders() {
