@@ -70,6 +70,17 @@ let historyViewMode = "active";
 let historyToggleButton = null;
 let activePanel = null;
 
+function updateHistoryToggleButtonLabel() {
+  if (!historyToggleButton) return;
+  historyToggleButton.textContent = historyViewMode === "active" ? "ACTIVAS" : "HISTORIAL";
+}
+
+function setHistoryViewMode(nextMode) {
+  historyViewMode = nextMode;
+  updateHistoryToggleButtonLabel();
+  refreshHistoryView();
+}
+
 // CSV Export button (admin)
 function setupCsvExportButton() {
   try {
@@ -1471,17 +1482,16 @@ async function openHistoryModal() {
   if (historyStatus && historyStatus.parentElement && !historyToggleButton) {
     historyToggleButton = document.createElement("button");
     historyToggleButton.className = "primary history-toggle";
-    historyToggleButton.textContent = "ACTIVAS";
     historyToggleButton.addEventListener("click", () => {
-      historyViewMode = historyViewMode === "active" ? "history" : "active";
-      historyToggleButton.textContent = historyViewMode === "active" ? "ACTIVAS" : "HISTORIAL";
-      refreshHistoryView();
+      const nextMode = historyViewMode === "active" ? "history" : "active";
+      setHistoryViewMode(nextMode);
     });
     historyStatus.parentElement.insertBefore(historyToggleButton, historyStatus);
+    updateHistoryToggleButtonLabel();
   }
   try {
     await fetchHistoryOrders();
-    refreshHistoryView();
+    setHistoryViewMode(historyViewMode);
   } catch (error) {
     console.error(error);
     historyList.innerHTML = "<p>No se pudo cargar historial.</p>";
