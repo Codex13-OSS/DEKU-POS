@@ -1266,6 +1266,10 @@ function renderPaymentPreviewTicket(order) {
 
 function startAppendOrder(order) {
   if (!order || !order.id) return;
+  const editableStatuses = ["pending", "preparing", "ready", "delivered"];
+  if (!editableStatuses.includes(order.status)) {
+    return;
+  }
   state.appendOrderId = order.id;
   state.cart = [];
   state.note = "";
