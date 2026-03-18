@@ -23,3 +23,8 @@ Thumbs.db
 *.tmp
 *.swp
 *.bak
+# Ignorar imágenes para evitar errores en Codex
+waiter-app/assets/menu/*.png
+waiter-app/assets/menu/*.jpg
+waiter-app/assets/menu/*.jpeg
+waiter-app/assets/menu/*.webp
