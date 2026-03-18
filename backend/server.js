@@ -200,6 +200,12 @@ async function updateOrderStatus(id, status, meta = {}) {
     const total = order && order.totals && typeof order.totals.total === "number"
       ? order.totals.total
       : 0;
+    const validPaymentMethods = ["cash", "card", "transfer"];
+
+    if (!meta.paymentMethod || !validPaymentMethods.includes(meta.paymentMethod)) {
+      return { error: "Método de pago inválido." };
+    }
+
     if (meta.paymentMethod === "cash") {
       const received = Number(meta.cashReceived);
 
@@ -210,6 +216,10 @@ async function updateOrderStatus(id, status, meta = {}) {
       order.paymentMethod = "cash";
       order.cashReceived = received;
       order.changeGiven = received - total;
+    } else {
+      order.paymentMethod = meta.paymentMethod;
+      order.changeGiven = 0;
+      delete order.cashReceived;
     }
     order.paidAt = new Date().toISOString();
   }

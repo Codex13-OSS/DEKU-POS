@@ -1325,10 +1325,24 @@ function renderPaymentPreviewTicket(order) {
   paymentBox.className = "cart-item";
 
   const paymentTitle = document.createElement("strong");
-  paymentTitle.textContent = "Cobro en efectivo";
+  paymentTitle.textContent = "Método de pago";
 
   const paymentTotal = document.createElement("div");
   paymentTotal.textContent = `Total a cobrar: ${formatPrice(total)}`;
+
+  const methodLabel = document.createElement("label");
+  methodLabel.textContent = "Selecciona método";
+
+  const methodSelect = document.createElement("select");
+  methodSelect.innerHTML = `
+    <option value="">Selecciona...</option>
+    <option value="cash">Efectivo</option>
+    <option value="card">Tarjeta</option>
+    <option value="transfer">Transferencia</option>
+  `;
+
+  const cashFields = document.createElement("div");
+  cashFields.className = "cart-item";
 
   const cashLabel = document.createElement("label");
   cashLabel.textContent = "Monto recibido";
@@ -1348,7 +1362,8 @@ function renderPaymentPreviewTicket(order) {
 
   const paymentHint = document.createElement("small");
 
-  paymentBox.append(paymentTitle, paymentTotal, cashLabel, cashInput, changeLine, paymentHint);
+  cashFields.append(cashLabel, cashInput);
+  paymentBox.append(paymentTitle, paymentTotal, methodLabel, methodSelect, cashFields, changeLine, paymentHint);
   cartItems.appendChild(paymentBox);
 
   const actions = document.createElement("div");
@@ -1360,13 +1375,29 @@ function renderPaymentPreviewTicket(order) {
   confirmBtn.disabled = true;
 
   function syncCashPaymentState() {
+    const paymentMethod = methodSelect.value;
     const rawValue = cashInput.value.trim();
     const received = Number(rawValue);
     const isValid = rawValue !== "" && Number.isFinite(received);
     const hasEnough = isValid && received >= total;
-    const change = hasEnough ? received - total : 0;
+    const change = paymentMethod === "cash" && hasEnough ? received - total : 0;
 
     changeValue.textContent = formatPrice(change);
+
+    if (!paymentMethod) {
+      cashFields.style.display = "none";
+      paymentHint.textContent = "Selecciona un método de pago.";
+      confirmBtn.disabled = true;
+      return;
+    }
+    if (paymentMethod !== "cash") {
+      cashFields.style.display = "none";
+      paymentHint.textContent = "";
+      confirmBtn.disabled = false;
+      return;
+    }
+
+    cashFields.style.display = "";
 
     if (!rawValue) {
       paymentHint.textContent = "Ingresa el monto recibido.";
@@ -1387,15 +1418,23 @@ function renderPaymentPreviewTicket(order) {
     confirmBtn.disabled = false;
   }
 
+  methodSelect.addEventListener("change", syncCashPaymentState);
   cashInput.addEventListener("input", syncCashPaymentState);
   confirmBtn.addEventListener("click", async () => {
-    const received = Number(cashInput.value);
-    const change = received - total;
-    const updated = await updateHistoryStatus(order.id, "paid", {
-      paymentMethod: "cash",
-      cashReceived: received,
-      changeGiven: change
-    });
+    const paymentMethod = methodSelect.value;
+    const extra = {
+      paymentMethod,
+      changeGiven: 0
+    };
+
+    if (paymentMethod === "cash") {
+      const received = Number(cashInput.value);
+      const change = received - total;
+      extra.cashReceived = received;
+      extra.changeGiven = change;
+    }
+
+    const updated = await updateHistoryStatus(order.id, "paid", extra);
     if (!updated) {
       return;
     }
