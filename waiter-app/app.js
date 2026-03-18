@@ -6,6 +6,7 @@ const state = {
   note: "",
   noteDraft: "",
   noteEditing: false,
+  paymentPreviewOrderId: null,
   appendOrderId: null,
   wizard: {
     open: false,
@@ -396,6 +397,7 @@ function adjustCartItem(productId, delta) {
 }
 
 function renderCart() {
+  state.paymentPreviewOrderId = null;
   cartItems.innerHTML = "";
 
   if (state.cart.length === 0) {
@@ -466,7 +468,9 @@ function resetLocalTicketState() {
   state.note = "";
   state.noteDraft = "";
   state.noteEditing = false;
+  state.paymentPreviewOrderId = null;
   state.appendOrderId = null;
+  activeHistoryOrderId = null;
   if (tableSelect) {
     tableSelect.value = "";
   }
@@ -1297,6 +1301,7 @@ function renderHistoryTicket(order) {
 function renderPaymentPreviewTicket(order) {
   if (!order) return;
 
+  state.paymentPreviewOrderId = order.id;
   cartItems.innerHTML = "";
   const items = Array.isArray(order.items) ? order.items : [];
 
