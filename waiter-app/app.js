@@ -6,6 +6,7 @@ const state = {
   note: "",
   noteDraft: "",
   noteEditing: false,
+  paymentPreviewOrderId: null,
   appendOrderId: null,
   wizard: {
     open: false,
@@ -63,6 +64,8 @@ const historyCashClosing = document.getElementById("historyCashClosing");
 const historyCashClosingDate = document.getElementById("historyCashClosingDate");
 const historyCashClosingList = document.getElementById("historyCashClosingList");
 const historyCashClosingTotal = document.getElementById("historyCashClosingTotal");
+const historyCashClosingCash = document.getElementById("historyCashClosingCash");
+const historyCashClosingDigital = document.getElementById("historyCashClosingDigital");
 
 let historyOrders = [];
 let activeHistoryOrderId = null;
@@ -396,6 +399,7 @@ function adjustCartItem(productId, delta) {
 }
 
 function renderCart() {
+  state.paymentPreviewOrderId = null;
   cartItems.innerHTML = "";
 
   if (state.cart.length === 0) {
@@ -459,6 +463,22 @@ function renderCart() {
   const totals = calculateTotals();
   subtotalEl.textContent = formatPrice(totals.subtotal);
   totalEl.textContent = formatPrice(totals.total);
+}
+
+function resetLocalTicketState() {
+  state.cart = [];
+  state.note = "";
+  state.noteDraft = "";
+  state.noteEditing = false;
+  state.paymentPreviewOrderId = null;
+  state.appendOrderId = null;
+  activeHistoryOrderId = null;
+  if (tableSelect) {
+    tableSelect.value = "";
+  }
+  orderFlowStep = 0;
+  renderCart();
+  updateOrderFlowUI();
 }
 
 function renderNoteSection() {
@@ -1108,6 +1128,12 @@ function hideCashClosingSummary() {
   if (historyCashClosingTotal) {
     historyCashClosingTotal.textContent = formatPrice(0);
   }
+  if (historyCashClosingCash) {
+    historyCashClosingCash.textContent = formatPrice(0);
+  }
+  if (historyCashClosingDigital) {
+    historyCashClosingDigital.textContent = formatPrice(0);
+  }
 }
 
 function renderCashClosingSummary() {
@@ -1129,8 +1155,23 @@ function renderCashClosingSummary() {
     historyCashClosingDate.textContent = `Fecha: ${dateKey}`;
   }
   historyCashClosingList.innerHTML = lines || "<p>No hay comandas pagadas para esta fecha.</p>";
-  const total = orders.reduce((sum, order) => sum + calculateOrderTotal(order), 0);
-  historyCashClosingTotal.textContent = formatPrice(total);
+  const totals = orders.reduce((sum, order) => {
+    const total = calculateOrderTotal(order);
+    sum.total += total;
+    if (order.paymentMethod === "card" || order.paymentMethod === "transfer") {
+      sum.totalDigital += total;
+    } else {
+      sum.totalCash += total;
+    }
+    return sum;
+  }, { total: 0, totalCash: 0, totalDigital: 0 });
+  historyCashClosingTotal.textContent = formatPrice(totals.total);
+  if (historyCashClosingCash) {
+    historyCashClosingCash.textContent = formatPrice(totals.totalCash);
+  }
+  if (historyCashClosingDigital) {
+    historyCashClosingDigital.textContent = formatPrice(totals.totalDigital);
+  }
 }
 
 function renderHistoryList(orders) {
@@ -1254,7 +1295,10 @@ function renderHistoryTicket(order) {
     const paidBtn = document.createElement("button");
     paidBtn.className = "primary";
     paidBtn.textContent = "Marcar PAGADA";
-    paidBtn.addEventListener("click", () => updateHistoryStatus(order.id, "paid"));
+    paidBtn.addEventListener("click", () => {
+      closeHistoryModal();
+      renderPaymentPreviewTicket(order);
+    });
     actions.appendChild(paidBtn);
   }
 
@@ -1280,6 +1324,7 @@ function renderHistoryTicket(order) {
 function renderPaymentPreviewTicket(order) {
   if (!order) return;
 
+  state.paymentPreviewOrderId = order.id;
   cartItems.innerHTML = "";
   const items = Array.isArray(order.items) ? order.items : [];
 
@@ -1312,9 +1357,56 @@ function renderPaymentPreviewTicket(order) {
   const subtotal = order.totals && typeof order.totals.subtotal === "number"
     ? order.totals.subtotal
     : calculateOrderTotal(order);
-  const total = calculateOrderTotal(order);
+  const total = order.totals && typeof order.totals.total === "number"
+    ? order.totals.total
+    : calculateOrderTotal(order);
   subtotalEl.textContent = formatPrice(subtotal);
   totalEl.textContent = formatPrice(total);
+
+  const paymentBox = document.createElement("div");
+  paymentBox.className = "cart-item";
+
+  const paymentTitle = document.createElement("strong");
+  paymentTitle.textContent = "Método de pago";
+
+  const paymentTotal = document.createElement("div");
+  paymentTotal.textContent = `Total a cobrar: ${formatPrice(total)}`;
+
+  const methodLabel = document.createElement("label");
+  methodLabel.textContent = "Selecciona método";
+
+  const methodSelect = document.createElement("select");
+  methodSelect.innerHTML = `
+    <option value="">Selecciona...</option>
+    <option value="cash">Efectivo</option>
+    <option value="card">Tarjeta</option>
+    <option value="transfer">Transferencia</option>
+  `;
+
+  const cashFields = document.createElement("div");
+  cashFields.className = "cart-item";
+
+  const cashLabel = document.createElement("label");
+  cashLabel.textContent = "Monto recibido";
+
+  const cashInput = document.createElement("input");
+  cashInput.type = "number";
+  cashInput.min = "0";
+  cashInput.step = "0.01";
+  cashInput.placeholder = String(total.toFixed(2));
+  cashInput.inputMode = "decimal";
+
+  const changeLine = document.createElement("div");
+  const changeValue = document.createElement("strong");
+  changeValue.textContent = formatPrice(0);
+  changeLine.innerHTML = "Cambio: ";
+  changeLine.appendChild(changeValue);
+
+  const paymentHint = document.createElement("small");
+
+  cashFields.append(cashLabel, cashInput);
+  paymentBox.append(paymentTitle, paymentTotal, methodLabel, methodSelect, cashFields, changeLine, paymentHint);
+  cartItems.appendChild(paymentBox);
 
   const actions = document.createElement("div");
   actions.className = "cart-item";
@@ -1322,11 +1414,75 @@ function renderPaymentPreviewTicket(order) {
   const confirmBtn = document.createElement("button");
   confirmBtn.className = "primary";
   confirmBtn.textContent = "CONFIRMAR PAGO";
+  confirmBtn.disabled = true;
+
+  function syncCashPaymentState() {
+    const paymentMethod = methodSelect.value;
+    const rawValue = cashInput.value.trim();
+    const received = Number(rawValue);
+    const isValid = rawValue !== "" && Number.isFinite(received);
+    const hasEnough = isValid && received >= total;
+    const change = paymentMethod === "cash" && hasEnough ? received - total : 0;
+
+    changeValue.textContent = formatPrice(change);
+
+    if (!paymentMethod) {
+      cashFields.style.display = "none";
+      paymentHint.textContent = "Selecciona un método de pago.";
+      confirmBtn.disabled = true;
+      return;
+    }
+    if (paymentMethod !== "cash") {
+      cashFields.style.display = "none";
+      paymentHint.textContent = "";
+      confirmBtn.disabled = false;
+      return;
+    }
+
+    cashFields.style.display = "";
+
+    if (!rawValue) {
+      paymentHint.textContent = "Ingresa el monto recibido.";
+      confirmBtn.disabled = true;
+      return;
+    }
+    if (!isValid) {
+      paymentHint.textContent = "Ingresa un monto válido.";
+      confirmBtn.disabled = true;
+      return;
+    }
+    if (!hasEnough) {
+      paymentHint.textContent = "El monto recibido debe cubrir el total.";
+      confirmBtn.disabled = true;
+      return;
+    }
+    paymentHint.textContent = "";
+    confirmBtn.disabled = false;
+  }
+
+  methodSelect.addEventListener("change", syncCashPaymentState);
+  cashInput.addEventListener("input", syncCashPaymentState);
   confirmBtn.addEventListener("click", async () => {
-    await updateHistoryStatus(order.id, "paid");
+    const paymentMethod = methodSelect.value;
+    const extra = {
+      paymentMethod,
+      changeGiven: 0
+    };
+
+    if (paymentMethod === "cash") {
+      const received = Number(cashInput.value);
+      const change = received - total;
+      extra.cashReceived = received;
+      extra.changeGiven = change;
+    }
+
+    const updated = await updateHistoryStatus(order.id, "paid", extra);
+    if (!updated) {
+      return;
+    }
+    resetLocalTicketState();
     await fetchHistoryOrders();
     renderActivePanel();
-    renderCart();
   });
 
   const cancelBtn = document.createElement("button");
@@ -1336,6 +1492,7 @@ function renderPaymentPreviewTicket(order) {
 
   actions.append(confirmBtn, cancelBtn);
   cartItems.appendChild(actions);
+  syncCashPaymentState();
 }
 
 function startAppendOrder(order) {
@@ -1521,8 +1678,10 @@ async function updateHistoryStatus(orderId, status, extra = {}) {
     }
     await fetchHistoryOrders();
     refreshHistoryView();
+    return true;
   } catch (error) {
     console.error(error);
+    return false;
   }
 }
 
