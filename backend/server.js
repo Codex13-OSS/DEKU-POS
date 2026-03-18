@@ -433,6 +433,38 @@ function generateOrderId() {
   return `ORD-${Date.now()}-${random}`;
 }
 
+function generateItemId(prefix = "item") {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildLegacyItemId(orderId, index) {
+  return `legacy-${orderId}-${index}`;
+}
+
+function normalizeIncomingItem(item, fallbackId) {
+  return {
+    ...item,
+    id: item && item.id ? item.id : fallbackId || generateItemId(),
+    parentItemId: item && item.parentItemId ? item.parentItemId : undefined,
+    prepared: item && typeof item.prepared === "boolean" ? item.prepared : false
+  };
+}
+
+function ensureExistingOrderItemIds(order) {
+  if (!order || !Array.isArray(order.items)) {
+    return;
+  }
+  order.items = order.items.map((item, index) => {
+    if (item && item.id) {
+      return item;
+    }
+    return {
+      ...item,
+      id: buildLegacyItemId(order.id, index)
+    };
+  });
+}
+
 function validateOrderPayload(payload) {
   if (!payload || !Array.isArray(payload.items) || payload.items.length === 0) {
     return "La orden debe incluir items.";
@@ -584,10 +616,7 @@ app.post("/api/orders", (req, res) => {
     createdAt: now.toISOString(),
     status: "pending",
     table,
-    items: req.body.items.map((item) => ({
-      ...item,
-      prepared: item && typeof item.prepared === "boolean" ? item.prepared : false
-    })),
+    items: req.body.items.map((item) => normalizeIncomingItem(item, generateItemId())),
     totals,
     note,
     notes: noteValue
@@ -639,16 +668,19 @@ app.post("/api/orders/:id/items", (req, res) => {
     return res.status(400).json({ error: "La orden no puede editarse." });
   }
 
+  ensureExistingOrderItemIds(order);
+
   const normalizedItems = itemsToAppend
-    .map((item) => ({
+    .map((item) => normalizeIncomingItem({
       productId: item && item.productId,
       name: item && item.name,
       qty: Number(item && item.qty),
       basePrice: Number(item && item.basePrice),
       unitPrice: Number(item && item.unitPrice),
       meta: item && item.meta ? item.meta : {},
+      parentItemId: item && item.parentItemId,
       prepared: item && typeof item.prepared === "boolean" ? item.prepared : false
-    }))
+    }, generateItemId()))
     .filter((item) => item.productId && item.name && Number.isFinite(item.qty) && item.qty > 0 && Number.isFinite(item.unitPrice));
 
   if (!normalizedItems.length) {
