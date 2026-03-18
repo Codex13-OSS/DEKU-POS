@@ -197,6 +197,20 @@ async function updateOrderStatus(id, status, meta = {}) {
   }
   order.status = status;
   if (status === "paid") {
+    const total = order && order.totals && typeof order.totals.total === "number"
+      ? order.totals.total
+      : 0;
+    if (meta.paymentMethod === "cash") {
+      const received = Number(meta.cashReceived);
+
+      if (!Number.isFinite(received) || received < total) {
+        return { error: "Monto recibido insuficiente." };
+      }
+
+      order.paymentMethod = "cash";
+      order.cashReceived = received;
+      order.changeGiven = received - total;
+    }
     order.paidAt = new Date().toISOString();
   }
   if (status === "cancelled") {
@@ -580,13 +594,18 @@ app.post("/api/orders", (req, res) => {
   res.status(201).json(order);
 });
 
-app.patch("/api/orders/:id", (req, res) => {
+app.patch("/api/orders/:id", async (req, res) => {
   const { id } = req.params;
-  const { status, cancelReason } = req.body;
+  const { status, cancelReason, cashReceived, changeGiven, paymentMethod } = req.body;
   if (!status || !["pending", "preparing", "ready", "delivered", "paid", "cancelled"].includes(status)) {
     return res.status(400).json({ error: "Status inválido." });
   }
-  const result = updateOrderStatus(id, status, { cancelReason });
+  const result = await updateOrderStatus(id, status, {
+    cancelReason,
+    cashReceived,
+    changeGiven,
+    paymentMethod
+  });
   if (result.error) {
     const code = result.error === "Orden no encontrada." ? 404 : 400;
     return res.status(code).json({ error: result.error });
