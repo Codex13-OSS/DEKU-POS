@@ -63,6 +63,8 @@ const historyCashClosing = document.getElementById("historyCashClosing");
 const historyCashClosingDate = document.getElementById("historyCashClosingDate");
 const historyCashClosingList = document.getElementById("historyCashClosingList");
 const historyCashClosingTotal = document.getElementById("historyCashClosingTotal");
+const historyCashClosingCash = document.getElementById("historyCashClosingCash");
+const historyCashClosingDigital = document.getElementById("historyCashClosingDigital");
 
 let historyOrders = [];
 let activeHistoryOrderId = null;
@@ -1108,6 +1110,12 @@ function hideCashClosingSummary() {
   if (historyCashClosingTotal) {
     historyCashClosingTotal.textContent = formatPrice(0);
   }
+  if (historyCashClosingCash) {
+    historyCashClosingCash.textContent = formatPrice(0);
+  }
+  if (historyCashClosingDigital) {
+    historyCashClosingDigital.textContent = formatPrice(0);
+  }
 }
 
 function renderCashClosingSummary() {
@@ -1129,8 +1137,23 @@ function renderCashClosingSummary() {
     historyCashClosingDate.textContent = `Fecha: ${dateKey}`;
   }
   historyCashClosingList.innerHTML = lines || "<p>No hay comandas pagadas para esta fecha.</p>";
-  const total = orders.reduce((sum, order) => sum + calculateOrderTotal(order), 0);
-  historyCashClosingTotal.textContent = formatPrice(total);
+  const totals = orders.reduce((sum, order) => {
+    const total = calculateOrderTotal(order);
+    sum.total += total;
+    if (order.paymentMethod === "card" || order.paymentMethod === "transfer") {
+      sum.totalDigital += total;
+    } else {
+      sum.totalCash += total;
+    }
+    return sum;
+  }, { total: 0, totalCash: 0, totalDigital: 0 });
+  historyCashClosingTotal.textContent = formatPrice(totals.total);
+  if (historyCashClosingCash) {
+    historyCashClosingCash.textContent = formatPrice(totals.totalCash);
+  }
+  if (historyCashClosingDigital) {
+    historyCashClosingDigital.textContent = formatPrice(totals.totalDigital);
+  }
 }
 
 function renderHistoryList(orders) {
