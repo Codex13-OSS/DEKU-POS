@@ -461,6 +461,20 @@ function renderCart() {
   totalEl.textContent = formatPrice(totals.total);
 }
 
+function resetLocalTicketState() {
+  state.cart = [];
+  state.note = "";
+  state.noteDraft = "";
+  state.noteEditing = false;
+  state.appendOrderId = null;
+  if (tableSelect) {
+    tableSelect.value = "";
+  }
+  orderFlowStep = 0;
+  renderCart();
+  updateOrderFlowUI();
+}
+
 function renderNoteSection() {
   const hasNote = Boolean(state.note && state.note.trim());
   if (state.cart.length === 0 && !state.noteEditing && !hasNote) {
@@ -1438,9 +1452,9 @@ function renderPaymentPreviewTicket(order) {
     if (!updated) {
       return;
     }
+    resetLocalTicketState();
     await fetchHistoryOrders();
     renderActivePanel();
-    renderCart();
   });
 
   const cancelBtn = document.createElement("button");
