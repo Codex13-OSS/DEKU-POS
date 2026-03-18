@@ -1254,7 +1254,10 @@ function renderHistoryTicket(order) {
     const paidBtn = document.createElement("button");
     paidBtn.className = "primary";
     paidBtn.textContent = "Marcar PAGADA";
-    paidBtn.addEventListener("click", () => updateHistoryStatus(order.id, "paid"));
+    paidBtn.addEventListener("click", () => {
+      closeHistoryModal();
+      renderPaymentPreviewTicket(order);
+    });
     actions.appendChild(paidBtn);
   }
 
@@ -1312,9 +1315,41 @@ function renderPaymentPreviewTicket(order) {
   const subtotal = order.totals && typeof order.totals.subtotal === "number"
     ? order.totals.subtotal
     : calculateOrderTotal(order);
-  const total = calculateOrderTotal(order);
+  const total = order.totals && typeof order.totals.total === "number"
+    ? order.totals.total
+    : calculateOrderTotal(order);
   subtotalEl.textContent = formatPrice(subtotal);
   totalEl.textContent = formatPrice(total);
+
+  const paymentBox = document.createElement("div");
+  paymentBox.className = "cart-item";
+
+  const paymentTitle = document.createElement("strong");
+  paymentTitle.textContent = "Cobro en efectivo";
+
+  const paymentTotal = document.createElement("div");
+  paymentTotal.textContent = `Total a cobrar: ${formatPrice(total)}`;
+
+  const cashLabel = document.createElement("label");
+  cashLabel.textContent = "Monto recibido";
+
+  const cashInput = document.createElement("input");
+  cashInput.type = "number";
+  cashInput.min = "0";
+  cashInput.step = "0.01";
+  cashInput.placeholder = String(total.toFixed(2));
+  cashInput.inputMode = "decimal";
+
+  const changeLine = document.createElement("div");
+  const changeValue = document.createElement("strong");
+  changeValue.textContent = formatPrice(0);
+  changeLine.innerHTML = "Cambio: ";
+  changeLine.appendChild(changeValue);
+
+  const paymentHint = document.createElement("small");
+
+  paymentBox.append(paymentTitle, paymentTotal, cashLabel, cashInput, changeLine, paymentHint);
+  cartItems.appendChild(paymentBox);
 
   const actions = document.createElement("div");
   actions.className = "cart-item";
@@ -1322,8 +1357,48 @@ function renderPaymentPreviewTicket(order) {
   const confirmBtn = document.createElement("button");
   confirmBtn.className = "primary";
   confirmBtn.textContent = "CONFIRMAR PAGO";
+  confirmBtn.disabled = true;
+
+  function syncCashPaymentState() {
+    const rawValue = cashInput.value.trim();
+    const received = Number(rawValue);
+    const isValid = rawValue !== "" && Number.isFinite(received);
+    const hasEnough = isValid && received >= total;
+    const change = hasEnough ? received - total : 0;
+
+    changeValue.textContent = formatPrice(change);
+
+    if (!rawValue) {
+      paymentHint.textContent = "Ingresa el monto recibido.";
+      confirmBtn.disabled = true;
+      return;
+    }
+    if (!isValid) {
+      paymentHint.textContent = "Ingresa un monto válido.";
+      confirmBtn.disabled = true;
+      return;
+    }
+    if (!hasEnough) {
+      paymentHint.textContent = "El monto recibido debe cubrir el total.";
+      confirmBtn.disabled = true;
+      return;
+    }
+    paymentHint.textContent = "";
+    confirmBtn.disabled = false;
+  }
+
+  cashInput.addEventListener("input", syncCashPaymentState);
   confirmBtn.addEventListener("click", async () => {
-    await updateHistoryStatus(order.id, "paid");
+    const received = Number(cashInput.value);
+    const change = received - total;
+    const updated = await updateHistoryStatus(order.id, "paid", {
+      paymentMethod: "cash",
+      cashReceived: received,
+      changeGiven: change
+    });
+    if (!updated) {
+      return;
+    }
     await fetchHistoryOrders();
     renderActivePanel();
     renderCart();
@@ -1336,6 +1411,7 @@ function renderPaymentPreviewTicket(order) {
 
   actions.append(confirmBtn, cancelBtn);
   cartItems.appendChild(actions);
+  syncCashPaymentState();
 }
 
 function startAppendOrder(order) {
@@ -1521,8 +1597,10 @@ async function updateHistoryStatus(orderId, status, extra = {}) {
     }
     await fetchHistoryOrders();
     refreshHistoryView();
+    return true;
   } catch (error) {
     console.error(error);
+    return false;
   }
 }
 
