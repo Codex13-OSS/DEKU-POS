@@ -1,22 +1,25 @@
 node_modules/
-**/node_modules/
-
-dist/
-build/
-coverage/
-
 .env
 .env.*
-!.env.example
-
 *.log
 logs/
 
+# Ignorar datos operativos
+backend/data/orders*.json
+backend/data/*.bak*
+backend/data/*.backup*
+backend/data/*.csv
+backend/data/*.db
+
+# Permitir config base
+!backend/data/menu.json
+!backend/data/promo.json
+
+# Otros
+*.sqlite
+*.sqlite3
 .DS_Store
 Thumbs.db
-
-backend/data/orders*.json
-backend/data/*.backup*.json
-backend/data/*.bak*.json
-backend/data/promo.server.bak.json
-
+*.tmp
+*.swp
+*.bak
