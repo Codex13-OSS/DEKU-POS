@@ -232,6 +232,9 @@ async function updateOrderStatus(id, status, meta = {}) {
       order.cancelReason = meta.cancelReason;
     }
   }
+  if (status === "delivered" && !order.deliveredAt) {
+    order.deliveredAt = new Date().toISOString();
+  }
   saveOrders(orders);
   if (status === "paid") {
     try {
@@ -747,6 +750,9 @@ app.post("/api/orders", (req, res) => {
     note,
     notes: noteValue
   };
+  if (!order.sentToKitchenAt) {
+    order.sentToKitchenAt = order.createdAt;
+  }
   order.promoApplied = promoApplied;
   order.promoType = "2x1_jueves";
   order.promoSource = promoPayload.promoActive ? promoPayload.promoSource : null;
