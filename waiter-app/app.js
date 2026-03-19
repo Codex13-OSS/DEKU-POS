@@ -196,6 +196,10 @@ function formatTime(iso) {
   });
 }
 
+function generateItemId(prefix = "item") {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
 function getMenuByCategory(category) {
   return state.menu.filter((item) => item.category === category);
 }
@@ -252,6 +256,12 @@ function renderProducts() {
       button.textContent = "Ordenar";
       button.addEventListener("click", () => openWizard(product));
       card.appendChild(button);
+    } else if (state.appendOrderId && product.category === "extras") {
+      const button = document.createElement("button");
+      button.className = "primary";
+      button.textContent = "Agregar a ramen";
+      button.addEventListener("click", () => adjustCartItem(product.id, 1));
+      card.appendChild(button);
     } else {
       const qtyControl = buildQtyControl(product.id, getCartQty(product.id));
       card.appendChild(qtyControl);
@@ -281,8 +291,116 @@ function buildQtyControl(productId, qty) {
 }
 
 function getCartQty(productId) {
-  const item = state.cart.find((entry) => entry.productId === productId && !entry.meta);
-  return item ? item.qty : 0;
+  return state.cart.reduce((sum, entry) => {
+    if (entry.productId !== productId) {
+      return sum;
+    }
+    return sum + (Number(entry.qty) || 0);
+  }, 0);
+}
+
+function getOrderById(orderId) {
+  return historyOrders.find((order) => order.id === orderId) || null;
+}
+
+function buildLegacyItemId(orderId, index) {
+  return `legacy-${orderId}-${index}`;
+}
+
+function isRamenItem(item) {
+  if (!item) return false;
+  if (item.meta && item.meta.kind === "extra") {
+    return false;
+  }
+  if (item.meta && item.meta.size) {
+    return true;
+  }
+  const product = getProductById(item.productId);
+  return Boolean(product && product.category === "ramen");
+}
+
+function getEligibleParentItems() {
+  const eligible = [];
+
+  if (state.appendOrderId) {
+    const order = getOrderById(state.appendOrderId);
+    const orderItems = Array.isArray(order && order.items) ? order.items : [];
+    orderItems.forEach((item, index) => {
+      if (!isRamenItem(item)) {
+        return;
+      }
+      eligible.push({
+        source: "order",
+        item,
+        id: item.id || buildLegacyItemId(order.id, index),
+        label: `${item.name}${item.meta && item.meta.size ? ` · ${item.meta.size}` : ""} · comanda activa`
+      });
+    });
+  }
+
+  state.cart.forEach((item) => {
+    if (!isRamenItem(item)) {
+      return;
+    }
+    eligible.push({
+      source: "cart",
+      item,
+      id: item.id,
+      label: `${item.name}${item.meta && item.meta.size ? ` · ${item.meta.size}` : ""} · carrito`
+    });
+  });
+
+  return eligible;
+}
+
+function getParentDisplayName(parentItem) {
+  if (!parentItem) return "ramen relacionado";
+  const size = parentItem.meta && parentItem.meta.size ? ` ${parentItem.meta.size}` : "";
+  return `${parentItem.name}${size}`;
+}
+
+function findParentItem(items, item, orderId = "") {
+  if (!item || !item.parentItemId || !Array.isArray(items)) {
+    return null;
+  }
+  return items.find((entry, index) => {
+    const fallbackId = entry && entry.id ? entry.id : buildLegacyItemId(orderId || "order", index);
+    return entry.id === item.parentItemId || fallbackId === item.parentItemId;
+  }) || null;
+}
+
+function sortItemsForDisplay(items = [], orderId = "") {
+  const parents = new Map();
+  const childrenByParent = new Map();
+  const rootItems = [];
+
+  items.forEach((item, index) => {
+    const stableId = item && item.id ? item.id : buildLegacyItemId(orderId || "order", index);
+    parents.set(stableId, item);
+    if (item && item.parentItemId) {
+      if (!childrenByParent.has(item.parentItemId)) {
+        childrenByParent.set(item.parentItemId, []);
+      }
+      childrenByParent.get(item.parentItemId).push(item);
+      return;
+    }
+    rootItems.push({ item, stableId });
+  });
+
+  const ordered = [];
+  rootItems.forEach(({ item, stableId }) => {
+    ordered.push(item);
+    const children = childrenByParent.get(stableId) || [];
+    children.forEach((child) => ordered.push(child));
+  });
+
+  items.forEach((item) => {
+    if (!ordered.includes(item)) {
+      ordered.push(item);
+    }
+  });
+
+  return ordered;
 }
 
 function showRamenSelector(ramenItems, productName, callback) {
@@ -315,13 +433,20 @@ function showRamenSelector(ramenItems, productName, callback) {
   ramenItems.forEach((ramen) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = ramen.name;
+    button.textContent = ramen.label || ramen.name;
     button.addEventListener("click", () => {
       overlay.remove();
       callback(ramen);
     });
     selector.appendChild(button);
   });
+
+  const cancelButton = document.createElement("button");
+  cancelButton.type = "button";
+  cancelButton.className = "ghost";
+  cancelButton.textContent = "Cancelar";
+  cancelButton.addEventListener("click", () => overlay.remove());
+  selector.appendChild(cancelButton);
 
   overlay.appendChild(selector);
   document.body.appendChild(overlay);
@@ -330,6 +455,52 @@ function showRamenSelector(ramenItems, productName, callback) {
 function adjustCartItem(productId, delta) {
   const product = getProductById(productId);
   if (!product) return;
+
+  if (state.appendOrderId && product.category === "extras" && delta > 0) {
+    const parentItems = getEligibleParentItems();
+    if (!parentItems.length) {
+      return setStatus("No hay ramen elegible en la comanda activa.");
+    }
+
+    const appendExtraToParent = (selection) => {
+      const parentItem = selection.item || selection;
+      const parentItemId = selection.id || parentItem.id;
+      const existingExtra = state.cart.find((entry) => (
+        entry.productId === product.id
+        && entry.parentItemId === parentItemId
+        && entry.meta
+        && entry.meta.kind === "extra"
+      ));
+
+      if (existingExtra) {
+        existingExtra.qty += 1;
+      } else {
+        state.cart.push({
+          id: generateItemId("extra"),
+          productId: product.id,
+          name: product.name,
+          qty: 1,
+          basePrice: product.price || 0,
+          unitPrice: product.price || 0,
+          parentItemId,
+          meta: {
+            kind: "extra"
+          }
+        });
+      }
+
+      renderProducts();
+      renderCart();
+    };
+
+    if (parentItems.length > 1) {
+      showRamenSelector(parentItems, product.name, appendExtraToParent);
+      return;
+    }
+
+    appendExtraToParent(parentItems[0]);
+    return;
+  }
 
   if (product.category === "extras") {
     const ramenItems = state.cart.filter((entry) => entry.meta);
@@ -378,10 +549,11 @@ function adjustCartItem(productId, delta) {
   let item = state.cart.find((entry) => entry.productId === productId && !entry.meta);
   if (!item && delta > 0) {
     item = {
-      id: `cart-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+      id: generateItemId("cart"),
       productId: product.id,
       name: product.name,
       qty: 0,
+      basePrice: product.price || 0,
       unitPrice: product.price || 0
     };
     state.cart.push(item);
@@ -398,6 +570,48 @@ function adjustCartItem(productId, delta) {
   renderCart();
 }
 
+function adjustCartLineItem(itemId, delta) {
+  const item = state.cart.find((entry) => entry.id === itemId);
+  if (!item) {
+    return;
+  }
+  item.qty += delta;
+  if (item.qty <= 0) {
+    state.cart = state.cart.filter((entry) => entry.id !== itemId);
+  }
+  renderProducts();
+  renderCart();
+}
+
+function buildItemContextDetail(item, items = state.cart, orderId = "") {
+  if (!item || !item.parentItemId) {
+    return "";
+  }
+  const parent = findParentItem(items, item, orderId);
+  return `Ligado a ${getParentDisplayName(parent)}`;
+}
+
+function buildCartLineQtyControl(item) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "qty-control";
+
+  const minus = document.createElement("button");
+  minus.type = "button";
+  minus.textContent = "-";
+  minus.addEventListener("click", () => adjustCartLineItem(item.id, -1));
+
+  const count = document.createElement("span");
+  count.textContent = item.qty;
+
+  const plus = document.createElement("button");
+  plus.type = "button";
+  plus.textContent = "+";
+  plus.addEventListener("click", () => adjustCartLineItem(item.id, 1));
+
+  wrapper.append(minus, count, plus);
+  return wrapper;
+}
+
 function renderCart() {
   state.paymentPreviewOrderId = null;
   cartItems.innerHTML = "";
@@ -406,7 +620,7 @@ function renderCart() {
     cartItems.innerHTML = "<p>No hay items aún.</p>";
   }
 
-  state.cart.forEach((item) => {
+  sortItemsForDisplay(state.cart).forEach((item) => {
     const wrapper = document.createElement("div");
     wrapper.className = "cart-item";
 
@@ -414,7 +628,7 @@ function renderCart() {
     header.className = "cart-item-header";
 
     const title = document.createElement("strong");
-    title.textContent = item.name;
+    title.textContent = item.parentItemId ? `↳ ${item.name}` : item.name;
 
     const price = document.createElement("span");
     price.textContent = formatPrice(item.unitPrice * item.qty);
@@ -423,36 +637,59 @@ function renderCart() {
 
     if (item.meta) {
       const detail = document.createElement("small");
-      detail.textContent = buildRamenDetail(item.meta);
-
-      const noteBtn = document.createElement("button");
-      noteBtn.className = "ghost";
-      noteBtn.textContent = "Agregar nota";
-      noteBtn.addEventListener("click", () => {
-        const response = prompt("Nota para este ramen:", item.meta.note || "");
-        const text = typeof response === "string" ? response.trim() : "";
-        if (!text) {
-          return;
-        }
-        item.meta.note = text;
-        renderCart();
-      });
+      detail.textContent = item.meta.kind === "extra"
+        ? buildItemContextDetail(item)
+        : buildRamenDetail(item.meta);
 
       const removeBtn = document.createElement("button");
       removeBtn.className = "ghost";
       removeBtn.textContent = "Quitar";
       removeBtn.addEventListener("click", () => removeCartItem(item.id));
 
-      if (item.meta.note) {
+      if (item.meta.kind === "extra") {
+        const controls = buildCartLineQtyControl(item);
+        wrapper.append(header, detail, controls, removeBtn);
+      } else if (item.meta.note) {
+        const noteBtn = document.createElement("button");
+        noteBtn.className = "ghost";
+        noteBtn.textContent = "Agregar nota";
+        noteBtn.addEventListener("click", () => {
+          const response = prompt("Nota para este ramen:", item.meta.note || "");
+          const text = typeof response === "string" ? response.trim() : "";
+          if (!text) {
+            return;
+          }
+          item.meta.note = text;
+          renderCart();
+        });
         const noteDetail = document.createElement("small");
         noteDetail.textContent = `nota: ${item.meta.note}`;
         wrapper.append(header, detail, noteDetail, noteBtn, removeBtn);
       } else {
+        const noteBtn = document.createElement("button");
+        noteBtn.className = "ghost";
+        noteBtn.textContent = "Agregar nota";
+        noteBtn.addEventListener("click", () => {
+          const response = prompt("Nota para este ramen:", item.meta.note || "");
+          const text = typeof response === "string" ? response.trim() : "";
+          if (!text) {
+            return;
+          }
+          item.meta.note = text;
+          renderCart();
+        });
         wrapper.append(header, detail, noteBtn, removeBtn);
       }
     } else {
-      const controls = buildQtyControl(item.productId, item.qty);
-      wrapper.append(header, controls);
+      const detailText = buildItemContextDetail(item);
+      wrapper.appendChild(header);
+      if (detailText) {
+        const detail = document.createElement("small");
+        detail.textContent = detailText;
+        wrapper.appendChild(detail);
+      }
+      const controls = buildCartLineQtyControl(item);
+      wrapper.appendChild(controls);
     }
 
     cartItems.appendChild(wrapper);
@@ -904,7 +1141,7 @@ function addRamenToCart() {
   const basePrice = ramen.base.prices[ramen.size];
 
   state.cart.push({
-    id: `ramen-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+    id: generateItemId("ramen"),
     productId: ramen.base.id,
     name: ramen.base.name,
     qty: 1,
@@ -983,20 +1220,24 @@ async function sendOrder() {
         ? item.basePrice
         : Math.max(0, item.unitPrice - extrasTotal);
       return {
+        id: item.id || generateItemId("item"),
         productId: item.productId,
         name: item.name,
         qty: item.qty,
         basePrice,
         unitPrice: item.unitPrice,
+        parentItemId: item.parentItemId,
         meta: item.meta || {}
       };
     }
     return {
+      id: item.id || generateItemId("item"),
       productId: item.productId,
       name: item.name,
       qty: item.qty,
       basePrice: item.basePrice,
       unitPrice: item.unitPrice,
+      parentItemId: item.parentItemId,
       meta: item.meta || {}
     };
   });
@@ -1239,7 +1480,7 @@ function calculateOrderTotal(order) {
 function renderHistoryTicket(order) {
   activeHistoryOrderId = order.id;
   const headerLine = "<div>qty | concepto | unit | importe</div>";
-  const lines = order.items.map((item) => {
+  const lines = sortItemsForDisplay(order.items, order.id).map((item) => {
     const lineTotal = item.qty * item.unitPrice;
     const size = item.meta && item.meta.size ? ` ${item.meta.size}` : "";
     const spicy = item.meta && item.meta.spicy !== null && item.meta.spicy !== undefined ? ` Picante ${item.meta.spicy}` : "";
@@ -1250,6 +1491,10 @@ function renderHistoryTicket(order) {
     if (item.meta && item.meta.extras && item.meta.extras.length > 0) {
       const extraNames = item.meta.extras.map(e => e.name).join(' + ');
       displayName = `${displayName} + ${extraNames}`;
+    }
+    if (item.parentItemId) {
+      const parentLabel = buildItemContextDetail(item, order.items, order.id);
+      displayName = `↳ ${displayName}${parentLabel ? ` (${parentLabel})` : ""}`;
     }
     
     const mainLine = `<div>${item.qty} | ${displayName} | ${formatPrice(item.unitPrice)} | ${formatPrice(lineTotal)}</div>`;
@@ -1328,7 +1573,7 @@ function renderPaymentPreviewTicket(order) {
   cartItems.innerHTML = "";
   const items = Array.isArray(order.items) ? order.items : [];
 
-  items.forEach((item) => {
+  sortItemsForDisplay(items, order.id).forEach((item) => {
     const wrapper = document.createElement("div");
     wrapper.className = "cart-item";
 
@@ -1336,7 +1581,7 @@ function renderPaymentPreviewTicket(order) {
     header.className = "cart-item-header";
 
     const title = document.createElement("strong");
-    title.textContent = `${item.qty}x ${item.name}`;
+    title.textContent = `${item.qty}x ${item.parentItemId ? `↳ ${item.name}` : item.name}`;
 
     const lineTotal = (item.qty || 0) * (item.unitPrice || 0);
     const price = document.createElement("span");
@@ -1347,8 +1592,17 @@ function renderPaymentPreviewTicket(order) {
 
     if (item.meta) {
       const detail = document.createElement("small");
-      detail.textContent = buildRamenDetail(item.meta);
+      detail.textContent = item.meta.kind === "extra"
+        ? buildItemContextDetail(item, items, order.id)
+        : buildRamenDetail(item.meta);
       wrapper.appendChild(detail);
+    } else {
+      const detailText = buildItemContextDetail(item, items, order.id);
+      if (detailText) {
+        const detail = document.createElement("small");
+        detail.textContent = detailText;
+        wrapper.appendChild(detail);
+      }
     }
 
     cartItems.appendChild(wrapper);
@@ -1522,11 +1776,13 @@ async function appendItemsToOrder() {
     return setStatus("Agrega productos antes de confirmar.");
   }
   const items = state.cart.map((item) => ({
+    id: item.id || generateItemId("item"),
     productId: item.productId,
     name: item.name,
     qty: item.qty,
     basePrice: typeof item.basePrice === "number" ? item.basePrice : item.unitPrice,
     unitPrice: item.unitPrice,
+    parentItemId: item.parentItemId,
     meta: item.meta || {}
   }));
 
@@ -1575,13 +1831,16 @@ function renderActivePanel() {
   const cards = activeOrders.map((order) => {
     const shortId = order.id.split("-").slice(-1)[0];
     const statusLabel = order.status.toUpperCase();
-    const items = order.items.map((item) => {
+    const items = sortItemsForDisplay(order.items, order.id).map((item) => {
       const size = item.meta && item.meta.size ? ` ${item.meta.size}` : "";
       const spicy = item.meta && item.meta.spicy !== null && item.meta.spicy !== undefined ? ` Picante ${item.meta.spicy}` : "";
       let displayName = `${item.name}${size}${spicy}`;
       if (item.meta && item.meta.extras && item.meta.extras.length > 0) {
         const extraNames = item.meta.extras.map((extra) => extra.name).join(" + ");
         displayName = `${displayName} + ${extraNames}`;
+      }
+      if (item.parentItemId) {
+        displayName = `↳ ${displayName}`;
       }
       return `${item.qty}x ${displayName}`;
     }).join(" · ");
@@ -1616,14 +1875,21 @@ function renderActivePanel() {
     const order = activeOrders.find((item) => item.id === orderId);
     const button = card.querySelector(".active-panel-action");
     if (!order || !button) return;
+    card.addEventListener("click", () => {
+      startAppendOrder(order);
+    });
     if (order.status === "ready") {
-      button.addEventListener("click", async () => {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
         await updateHistoryStatus(order.id, "delivered");
         await fetchHistoryOrders();
         renderActivePanel();
       });
     } else if (order.status === "delivered") {
-      button.addEventListener("click", () => renderPaymentPreviewTicket(order));
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        renderPaymentPreviewTicket(order);
+      });
     } else {
       button.disabled = true;
     }
