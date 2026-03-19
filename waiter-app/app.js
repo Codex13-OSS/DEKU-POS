@@ -92,7 +92,11 @@ function setupCsvExportButton() {
     if (!btn) return;
     btn.addEventListener('click', function() {
       try {
-        var url = (BACKEND_BASE || '') + '/admin/export.csv?range=week';
+        var selectedDate = historyDate && historyDate.value ? historyDate.value : '';
+        var query = selectedDate
+          ? '?date=' + encodeURIComponent(selectedDate)
+          : '?range=week';
+        var url = (BACKEND_BASE || '') + '/api/export' + query;
         // Optional token support (if you later inject it in the page)
         if (window.ADMIN_EXPORT_TOKEN) {
           url += '&token=' + encodeURIComponent(String(window.ADMIN_EXPORT_TOKEN));
@@ -616,11 +620,17 @@ function renderCart() {
   state.paymentPreviewOrderId = null;
   cartItems.innerHTML = "";
 
-  if (state.cart.length === 0) {
+  const appendOrder = state.appendOrderId ? getOrderById(state.appendOrderId) : null;
+  const appendOrderItems = Array.isArray(appendOrder && appendOrder.items) ? appendOrder.items : [];
+  const cartDisplayItems = state.appendOrderId
+    ? [...appendOrderItems, ...state.cart]
+    : state.cart;
+
+  if (cartDisplayItems.length === 0) {
     cartItems.innerHTML = "<p>No hay items aún.</p>";
   }
 
-  sortItemsForDisplay(state.cart).forEach((item) => {
+  sortItemsForDisplay(cartDisplayItems, appendOrder ? appendOrder.id : "").forEach((item) => {
     const wrapper = document.createElement("div");
     wrapper.className = "cart-item";
 
@@ -1760,6 +1770,9 @@ function startAppendOrder(order) {
   state.note = "";
   state.noteDraft = "";
   state.noteEditing = false;
+  if (tableSelect) {
+    tableSelect.value = order.table || "";
+  }
   orderFlowStep = 2;
   state.activeCategory = "sides";
   closeHistoryModal();
@@ -1876,7 +1889,7 @@ function renderActivePanel() {
     const button = card.querySelector(".active-panel-action");
     if (!order || !button) return;
     card.addEventListener("click", () => {
-      renderHistoryTicket(order);
+      startAppendOrder(order);
     });
     if (order.status === "ready") {
       button.addEventListener("click", async (event) => {
@@ -1891,6 +1904,9 @@ function renderActivePanel() {
         renderPaymentPreviewTicket(order);
       });
     } else {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
       button.disabled = true;
     }
   });
