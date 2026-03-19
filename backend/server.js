@@ -53,6 +53,9 @@ app.use("/api", (req, res, next) => {
   if (req.path === "/orders" && req.method === "GET") {
     return next();
   }
+  if (req.path === "/export" && req.method === "GET") {
+    return next();
+  }
   if (/^\/orders\/[^/]+$/.test(req.path) && req.method === "PATCH") {
     return next();
   }
@@ -265,10 +268,136 @@ function csvEscape(val) {
   return s;
 }
 
+function parseDateValue(value) {
+  if (!value) return null;
+  var date = new Date(value);
+  return isNaN(date.getTime()) ? null : date;
+}
+
 function pickOrderDateForRange(order) {
   // Prefer paidAt for sales-based ranges; fallback to createdAt
-  var d = (order && order.paidAt) ? order.paidAt : (order && order.createdAt);
-  return d ? new Date(d) : null;
+  return parseDateValue((order && order.paidAt) ? order.paidAt : (order && order.createdAt));
+}
+
+function getCreatedAtDateKey(order) {
+  var createdAt = parseDateValue(order && order.createdAt);
+  return createdAt ? createdAt.toISOString().slice(0, 10) : null;
+}
+
+function diffSeconds(startValue, endValue) {
+  var start = parseDateValue(startValue);
+  var end = parseDateValue(endValue);
+  if (!start || !end) return null;
+  var diffMs = end.getTime() - start.getTime();
+  if (diffMs < 0) return null;
+  return Math.round(diffMs / 1000);
+}
+
+function getPreparedAtMetrics(order) {
+  var items = Array.isArray(order && order.items) ? order.items : [];
+  var preparedDates = [];
+
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i] || {};
+    var preparedAt = parseDateValue(item.preparedAt);
+    if (preparedAt) {
+      preparedDates.push(preparedAt);
+    }
+  }
+
+  if (!preparedDates.length) {
+    return { firstPreparedAt: null, lastPreparedAt: null };
+  }
+
+  preparedDates.sort(function(a, b) {
+    return a.getTime() - b.getTime();
+  });
+
+  return {
+    firstPreparedAt: preparedDates[0].toISOString(),
+    lastPreparedAt: preparedDates[preparedDates.length - 1].toISOString()
+  };
+}
+
+function buildOrderItemsSummary(order) {
+  var items = Array.isArray(order && order.items) ? order.items : [];
+  var count = 0;
+  var parts = [];
+
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i] || {};
+    var qty = toNumber(item.qty || 0);
+    count += qty;
+
+    var label = '';
+    if (qty > 0) {
+      label += qty + 'x ';
+    }
+    label += item.name || item.productId || 'item';
+
+    var meta = item.meta || {};
+    if (meta.size) {
+      label += ' (' + meta.size;
+      if (meta.spicy !== undefined && meta.spicy !== null) {
+        label += ', Picante ' + meta.spicy;
+      }
+      label += ')';
+    } else if (meta.spicy !== undefined && meta.spicy !== null) {
+      label += ' (Picante ' + meta.spicy + ')';
+    }
+
+    var extras = Array.isArray(meta.extras) ? meta.extras : [];
+    if (extras.length) {
+      var extrasSummary = [];
+      for (var j = 0; j < extras.length; j++) {
+        var extra = extras[j] || {};
+        var extraQty = toNumber(extra.qty || 0);
+        var extraLabel = extra.name || extra.productId || 'extra';
+        if (extraQty > 0) {
+          extraLabel += ' x' + extraQty;
+        }
+        extrasSummary.push(extraLabel);
+      }
+      if (extrasSummary.length) {
+        label += ' + ' + extrasSummary.join(' + ');
+      }
+    }
+
+    parts.push(label);
+  }
+
+  return {
+    itemsCount: count,
+    itemsSummary: parts.join(' | ')
+  };
+}
+
+function buildOrdersCsvRow(order) {
+  var o = order || {};
+  var totals = o.totals || {};
+  var preparedMetrics = getPreparedAtMetrics(o);
+  var itemsData = buildOrderItemsSummary(o);
+  var sentToKitchenAt = o.sentToKitchenAt || null;
+  var deliveredAt = o.deliveredAt || null;
+  var paidAt = o.paidAt || null;
+
+  return [
+    csvEscape(o.id || ''),
+    csvEscape(o.createdAt || ''),
+    csvEscape(sentToKitchenAt),
+    csvEscape(deliveredAt),
+    csvEscape(paidAt),
+    csvEscape(o.status || ''),
+    csvEscape(o.table || ''),
+    csvEscape(typeof totals.total === 'number' ? totals.total : (totals.total || '')),
+    csvEscape(typeof o.promoDiscount === 'number' ? o.promoDiscount : (o.promoDiscount || 0)),
+    csvEscape(diffSeconds(sentToKitchenAt, preparedMetrics.firstPreparedAt)),
+    csvEscape(diffSeconds(sentToKitchenAt, preparedMetrics.lastPreparedAt)),
+    csvEscape(diffSeconds(deliveredAt, paidAt)),
+    csvEscape(diffSeconds(o.createdAt, paidAt)),
+    csvEscape(itemsData.itemsCount),
+    csvEscape(itemsData.itemsSummary)
+  ];
 }
 
 function startOfTodayLocal() {
@@ -291,27 +420,24 @@ function ordersToCsvRows(orders) {
   // Header
   lines.push([
     'id',
-    'createdAt',
-    'paidAt',
+    'created_at',
+    'sent_to_kitchen_at',
+    'delivered_at',
+    'paid_at',
     'status',
     'table',
     'total',
-    'promoDiscount'
+    'promoDiscount',
+    'prep_time_seconds',
+    'kitchen_total_time_seconds',
+    'service_time_seconds',
+    'total_time_seconds',
+    'items_count',
+    'items_summary'
   ].join(','));
 
   for (var i = 0; i < orders.length; i++) {
-    var o = orders[i] || {};
-    var totals = o.totals || {};
-    var row = [
-      csvEscape(o.id || ''),
-      csvEscape(o.createdAt || ''),
-      csvEscape(o.paidAt || ''),
-      csvEscape(o.status || ''),
-      csvEscape(o.table || ''),
-      csvEscape(typeof totals.total === 'number' ? totals.total : (totals.total || '')),
-      csvEscape(typeof o.promoDiscount === 'number' ? o.promoDiscount : (o.promoDiscount || 0))
-    ];
-    lines.push(row.join(','));
+    lines.push(buildOrdersCsvRow(orders[i]).join(','));
   }
   return lines.join('\n') + '\n';
 }
@@ -743,6 +869,17 @@ app.patch("/api/orders/:orderId/items/:index", (req, res) => {
 
   order.items[itemIndex].prepared = prepared;
 
+  if (prepared && !order.items[itemIndex].preparedAt) {
+    const now = new Date().toISOString();
+    if (!Array.isArray(order.events)) order.events = [];
+    order.items[itemIndex].preparedAt = now;
+    order.events.push({
+      type: "item_prepared",
+      itemId: order.items[itemIndex].id,
+      timestamp: now
+    });
+  }
+
   saveOrders(orders);
   broadcast("order:updated", order);
   res.json(order);
@@ -802,6 +939,9 @@ app.use((req, res, next) => {
   if (pathName === "/login" || pathName === "/logout" || pathName === "/login.css" || pathName === "/login.js") {
     return next();
   }
+  if (pathName === "/admin/export.csv" || pathName === "/admin/export-items.csv") {
+    return next();
+  }
   if (pathName === "/assets/brand/logo.png" || pathName.startsWith("/assets/menu/")) {
     return next();
   }
@@ -811,57 +951,66 @@ app.use((req, res, next) => {
   return res.redirect("/login");
 });
 
-// Admin export CSV (JSON source of truth)
-app.get('/admin/export.csv', function(req, res) {
-  try {
-    // Allow token auth if configured (useful for public server), otherwise require cookie session
-    var tokenEnv = process.env.ADMIN_EXPORT_TOKEN;
-    var tokenQ = req.query && req.query.token ? String(req.query.token) : '';
-    var hasValidToken = tokenEnv && tokenQ && tokenQ === tokenEnv;
+function hasExportAccess(req) {
+  var tokenEnv = process.env.ADMIN_EXPORT_TOKEN;
+  var tokenQ = req.query && req.query.token ? String(req.query.token) : '';
+  var hasValidToken = tokenEnv && tokenQ && tokenQ === tokenEnv;
+  if (hasValidToken) {
+    return true;
+  }
+  var cookieHeader = req.headers && req.headers.cookie ? String(req.headers.cookie) : '';
+  return cookieHeader.indexOf('mesero_session=ok') !== -1;
+}
 
-    // Cookie auth: same session cookie used by waiter login
-    // If token is valid, skip cookie requirement.
-    if (!hasValidToken) {
-      var cookieHeader = req.headers && req.headers.cookie ? String(req.headers.cookie) : '';
-      if (cookieHeader.indexOf('mesero_session=ok') === -1) {
-        res.status(401).send('Unauthorized');
-        return;
-      }
+function getFilteredOrdersForExport(req) {
+  var include = (req.query && req.query.include) ? String(req.query.include) : 'paid';
+  var range = (req.query && req.query.range) ? String(req.query.range) : 'week';
+  var date = (req.query && req.query.date) ? String(req.query.date) : '';
+  var hasDateFilter = /^\d{4}-\d{2}-\d{2}$/.test(date);
+  var bounds = hasDateFilter ? null : getRangeBounds(range);
+  var orders = loadOrders() || [];
+  var filtered = [];
+
+  for (var i = 0; i < orders.length; i++) {
+    var o = orders[i];
+    if (!o) continue;
+    if (include !== 'all') {
+      if (o.status !== 'paid') continue; // PAGADO real confirmado
     }
+    // Excluir canceladas siempre salvo include=all (si quieren auditar)
+    if (include !== 'all' && o.status === 'cancelled') continue;
 
-    var include = (req.query && req.query.include) ? String(req.query.include) : 'paid';
-    var range = (req.query && req.query.range) ? String(req.query.range) : 'week';
-    var bounds = getRangeBounds(range);
-
-    var orders = loadOrders() || [];
-
-    // Filter by status
-    var filtered = [];
-    for (var i = 0; i < orders.length; i++) {
-      var o = orders[i];
-      if (!o) continue;
-      if (include !== 'all') {
-        if (o.status !== 'paid') continue; // PAGADO real confirmado
-      }
-      // Excluir canceladas siempre salvo include=all (si quieren auditar)
-      if (include !== 'all' && o.status === 'cancelled') continue;
-
-      var d = pickOrderDateForRange(o);
-      if (!d || isNaN(d.getTime())) continue;
-      if (d < bounds.from || d > bounds.to) continue;
+    if (hasDateFilter) {
+      if (getCreatedAtDateKey(o) !== date) continue;
       filtered.push(o);
+      continue;
     }
 
-    // Sort by date asc
-    filtered.sort(function(a, b) {
-      var da = pickOrderDateForRange(a);
-      var db = pickOrderDateForRange(b);
-      var ta = da ? da.getTime() : 0;
-      var tb = db ? db.getTime() : 0;
-      return ta - tb;
-    });
+    var d = pickOrderDateForRange(o);
+    if (!d || isNaN(d.getTime())) continue;
+    if (d < bounds.from || d > bounds.to) continue;
+    filtered.push(o);
+  }
 
-    var csv = ordersToCsvRows(filtered);
+  filtered.sort(function(a, b) {
+    var da = hasDateFilter ? parseDateValue(a && a.createdAt) : pickOrderDateForRange(a);
+    var db = hasDateFilter ? parseDateValue(b && b.createdAt) : pickOrderDateForRange(b);
+    var ta = da ? da.getTime() : 0;
+    var tb = db ? db.getTime() : 0;
+    return ta - tb;
+  });
+
+  return filtered;
+}
+
+function handleOrdersCsvExport(req, res) {
+  try {
+    if (!hasExportAccess(req)) {
+      res.status(401).send('Unauthorized');
+      return;
+    }
+
+    var csv = ordersToCsvRows(getFilteredOrdersForExport(req));
 
     var now = new Date();
     var yyyy = String(now.getFullYear());
@@ -876,7 +1025,11 @@ app.get('/admin/export.csv', function(req, res) {
     console.error('[export.csv] error:', e);
     res.status(500).send('Export error');
   }
-});
+}
+
+// Admin export CSV (JSON source of truth)
+app.get('/admin/export.csv', handleOrdersCsvExport);
+app.get('/api/export', handleOrdersCsvExport);
 
 // Admin export detailed items CSV (JSON source of truth)
 app.get('/admin/export-items.csv', function(req, res) {
