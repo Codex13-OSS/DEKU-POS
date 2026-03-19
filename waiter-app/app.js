@@ -1875,14 +1875,21 @@ function renderActivePanel() {
     const order = activeOrders.find((item) => item.id === orderId);
     const button = card.querySelector(".active-panel-action");
     if (!order || !button) return;
+    card.addEventListener("click", () => {
+      renderHistoryTicket(order);
+    });
     if (order.status === "ready") {
-      button.addEventListener("click", async () => {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
         await updateHistoryStatus(order.id, "delivered");
         await fetchHistoryOrders();
         renderActivePanel();
       });
     } else if (order.status === "delivered") {
-      button.addEventListener("click", () => renderPaymentPreviewTicket(order));
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        renderPaymentPreviewTicket(order);
+      });
     } else {
       button.disabled = true;
     }
