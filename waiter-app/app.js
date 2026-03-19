@@ -92,7 +92,11 @@ function setupCsvExportButton() {
     if (!btn) return;
     btn.addEventListener('click', function() {
       try {
-        var url = (BACKEND_BASE || '') + '/admin/export.csv?range=week';
+        var selectedDate = historyDate && historyDate.value ? historyDate.value : '';
+        var query = selectedDate
+          ? '?date=' + encodeURIComponent(selectedDate)
+          : '?range=week';
+        var url = (BACKEND_BASE || '') + '/api/export' + query;
         // Optional token support (if you later inject it in the page)
         if (window.ADMIN_EXPORT_TOKEN) {
           url += '&token=' + encodeURIComponent(String(window.ADMIN_EXPORT_TOKEN));
