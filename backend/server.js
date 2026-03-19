@@ -743,6 +743,17 @@ app.patch("/api/orders/:orderId/items/:index", (req, res) => {
 
   order.items[itemIndex].prepared = prepared;
 
+  if (prepared && !order.items[itemIndex].preparedAt) {
+    const now = new Date().toISOString();
+    if (!Array.isArray(order.events)) order.events = [];
+    order.items[itemIndex].preparedAt = now;
+    order.events.push({
+      type: "item_prepared",
+      itemId: order.items[itemIndex].id,
+      timestamp: now
+    });
+  }
+
   saveOrders(orders);
   broadcast("order:updated", order);
   res.json(order);
