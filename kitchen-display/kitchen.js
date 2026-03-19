@@ -110,14 +110,51 @@ function formatTime(iso) {
 }
 
 function buildItemLine(item) {
+  const prefix = item && item.parentItemId ? "↳ " : "";
   if (item.meta && item.meta.size) {
     const extras = item.meta.extras && item.meta.extras.length
       ? ` | Extras: ${item.meta.extras.map((extra) => `${extra.name} x${extra.qty}`).join(", ")}`
       : "";
     const spicy = item.meta.spicy !== null && item.meta.spicy !== undefined ? `, Picante ${item.meta.spicy}` : "";
-    return `${item.qty}x ${item.name} (${item.meta.size}${spicy}${extras})`;
+    return `${item.qty}x ${prefix}${item.name} (${item.meta.size}${spicy}${extras})`;
   }
-  return `${item.qty}x ${item.name}`;
+  return `${item.qty}x ${prefix}${item.name}`;
+}
+
+function buildLegacyItemId(orderId, index) {
+  return `legacy-${orderId}-${index}`;
+}
+
+function sortItemsForDisplay(items = [], orderId = "") {
+  const childrenByParent = new Map();
+  const rootItems = [];
+
+  items.forEach((item, index) => {
+    const stableId = item && item.id ? item.id : buildLegacyItemId(orderId || "order", index);
+    if (item && item.parentItemId) {
+      if (!childrenByParent.has(item.parentItemId)) {
+        childrenByParent.set(item.parentItemId, []);
+      }
+      childrenByParent.get(item.parentItemId).push({ item, index });
+      return;
+    }
+    rootItems.push({ item, stableId, index });
+  });
+
+  const ordered = [];
+  rootItems.forEach(({ item, stableId, index }) => {
+    ordered.push({ item, index });
+    const children = childrenByParent.get(stableId) || [];
+    children.forEach((child) => ordered.push(child));
+  });
+
+  items.forEach((item, index) => {
+    if (!ordered.some((entry) => entry.item === item)) {
+      ordered.push({ item, index });
+    }
+  });
+
+  return ordered;
 }
 
 function getProductImage(productId) {
@@ -156,7 +193,7 @@ function renderOrders() {
 
     const items = document.createElement("div");
     items.className = "order-items";
-    order.items.forEach((item, itemIndex) => {
+    sortItemsForDisplay(order.items, order.id).forEach(({ item, index: itemIndex }) => {
       const line = document.createElement("div");
       line.className = `order-item${item.prepared ? " done" : ""}`;
       line.setAttribute("role", "button");
