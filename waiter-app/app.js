@@ -118,10 +118,18 @@ function setupItemsCsvExportButton() {
     if (!btn) return;
     btn.addEventListener('click', function() {
       try {
-        var url = (BACKEND_BASE || '') + '/admin/export-items.csv?range=week';
-        if (window.ADMIN_EXPORT_TOKEN) {
-          url += '&token=' + encodeURIComponent(String(window.ADMIN_EXPORT_TOKEN));
+        var historyDateEl = document.getElementById('historyDate');
+        var selectedDate = historyDateEl ? historyDateEl.value : '';
+        var query = '';
+        if (selectedDate) {
+          query = '?date=' + encodeURIComponent(selectedDate);
+        } else {
+          query = '?range=week';
         }
+        if (window.ADMIN_EXPORT_TOKEN) {
+          query += (query.indexOf('?') === -1 ? '?' : '&') + 'token=' + encodeURIComponent(window.ADMIN_EXPORT_TOKEN);
+        }
+        var url = (BACKEND_BASE || '') + '/admin/export-items.csv' + query;
         window.open(url, '_blank');
       } catch (e) {
         console.error('Items CSV export click error', e);
