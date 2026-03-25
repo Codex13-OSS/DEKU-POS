@@ -1654,6 +1654,14 @@ function renderPaymentPreviewTicket(order) {
   const paymentTotalPreview = document.createElement("div");
   paymentTotalPreview.id = "payment-total-preview";
 
+  const paymentMethodSelector = document.createElement("div");
+  paymentMethodSelector.id = "payment-method-selector";
+  paymentMethodSelector.innerHTML = `
+    <button type="button" id="primary-cash-btn" onclick="setPrimaryMethod('cash')">Efectivo</button>
+    <button type="button" id="primary-card-btn" onclick="setPrimaryMethod('card')">Tarjeta</button>
+    <button type="button" id="primary-transfer-btn" onclick="setPrimaryMethod('transfer')">Transferencia</button>
+  `;
+
   const remainingContainer = document.createElement("div");
   remainingContainer.id = "remaining-payment-container";
   remainingContainer.style.display = "none";
@@ -1701,6 +1709,7 @@ function renderPaymentPreviewTicket(order) {
   paymentBox.append(
     paymentTitle,
     paymentTotal,
+    paymentMethodSelector,
     mixedPaymentContainer,
     paymentTotalPreview,
     remainingContainer,
@@ -1716,7 +1725,34 @@ function renderPaymentPreviewTicket(order) {
   confirmBtn.className = "primary";
   confirmBtn.textContent = "CONFIRMAR PAGO";
   confirmBtn.disabled = true;
+  var primaryMethod = null;
   var remainingMethod = null;
+
+  function renderPaymentUI() {
+    document.getElementById("primary-cash-btn").classList.toggle("primary", primaryMethod === "cash");
+    document.getElementById("primary-card-btn").classList.toggle("primary", primaryMethod === "card");
+    document.getElementById("primary-transfer-btn").classList.toggle("primary", primaryMethod === "transfer");
+
+    if (primaryMethod === "card" || primaryMethod === "transfer") {
+      mixedPaymentContainer.style.display = "none";
+      paymentTotalPreview.style.display = "none";
+      remainingContainer.style.display = "none";
+      changeLine.style.display = "none";
+      paymentHint.textContent = "";
+      confirmBtn.disabled = false;
+      return;
+    }
+
+    mixedPaymentContainer.style.display = "";
+    paymentTotalPreview.style.display = "";
+    changeLine.style.display = "";
+    syncCashPaymentState();
+  }
+
+  window.setPrimaryMethod = function setPrimaryMethod(method) {
+    primaryMethod = method;
+    renderPaymentUI();
+  };
 
   function setRemainingMethod(method) {
     remainingMethod = method;
@@ -1726,6 +1762,12 @@ function renderPaymentPreviewTicket(order) {
   }
 
   function syncCashPaymentState() {
+    if (primaryMethod !== "cash") {
+      remainingContainer.style.display = "none";
+      paymentHint.textContent = "";
+      confirmBtn.disabled = !primaryMethod;
+      return;
+    }
     var cash = Number(document.getElementById("pay-cash").value) || 0;
     var currentOrder = { total: total };
     var totalToPay = currentOrder.total || 0;
@@ -1802,6 +1844,28 @@ function renderPaymentPreviewTicket(order) {
   document.getElementById("remaining-card-btn").addEventListener("click", () => setRemainingMethod("card"));
   document.getElementById("remaining-transfer-btn").addEventListener("click", () => setRemainingMethod("transfer"));
   confirmBtn.addEventListener("click", async () => {
+    if (!primaryMethod) {
+      alert("Selecciona método de pago");
+      return;
+    }
+    if (primaryMethod === "card" || primaryMethod === "transfer") {
+      var cardOrTransferPayments = [{
+        method: primaryMethod,
+        amount: total
+      }];
+      const updatedPrimary = await updateHistoryStatus(order.id, "paid", {
+        status: "paid",
+        payments: cardOrTransferPayments
+      });
+      if (!updatedPrimary) {
+        return;
+      }
+      resetLocalTicketState();
+      await fetchHistoryOrders();
+      renderActivePanel();
+      return;
+    }
+
     var cash = Number(document.getElementById("pay-cash").value) || 0;
     var currentOrder = { total: total };
     var totalToPay = currentOrder.total || 0;
@@ -1860,7 +1924,7 @@ function renderPaymentPreviewTicket(order) {
 
   actions.append(confirmBtn, cancelBtn);
   cartItems.appendChild(actions);
-  syncCashPaymentState();
+  renderPaymentUI();
 }
 
 function startAppendOrder(order) {
