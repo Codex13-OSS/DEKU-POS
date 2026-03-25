@@ -1079,6 +1079,7 @@ app.get('/admin/export-items.csv', function(req, res) {
 
     var include = (req.query && req.query.include) ? String(req.query.include) : 'paid';
     var range = (req.query && req.query.range) ? String(req.query.range) : 'week';
+    var date = req.query.date;
     var bounds = getRangeBounds(range);
 
     var orders = loadOrders() || [];
@@ -1091,9 +1092,14 @@ app.get('/admin/export-items.csv', function(req, res) {
       }
       if (include !== 'all' && o.status === 'cancelled') continue;
 
-      var d = pickOrderDateForRange(o);
-      if (!d || isNaN(d.getTime())) continue;
-      if (d < bounds.from || d > bounds.to) continue;
+      if (date) {
+        var opDate = getOperationalDate(o);
+        if (opDate !== date) continue;
+      } else {
+        var d = pickOrderDateForRange(o);
+        if (!d || isNaN(d.getTime())) continue;
+        if (d < bounds.from || d > bounds.to) continue;
+      }
       filtered.push(o);
     }
 
