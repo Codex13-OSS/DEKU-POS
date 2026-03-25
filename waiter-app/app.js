@@ -73,6 +73,7 @@ let orderFlowStep = 0;
 let historyViewMode = "active";
 let historyToggleButton = null;
 let activePanel = null;
+var currentOrder = null;
 
 function updateHistoryToggleButtonLabel() {
   if (!historyToggleButton) return;
@@ -1609,6 +1610,10 @@ function renderHistoryTicket(order) {
 
 function renderPaymentPreviewTicket(order) {
   if (!order) return;
+  currentOrder = order;
+  if (!currentOrder.guests) {
+    currentOrder.guests = [];
+  }
 
   state.paymentPreviewOrderId = order.id;
   cartItems.innerHTML = "";
@@ -1748,6 +1753,46 @@ function renderPaymentPreviewTicket(order) {
   confirmBtn.className = "primary";
   confirmBtn.textContent = "CONFIRMAR PAGO";
   confirmBtn.disabled = true;
+  var primaryMethod = null;
+  var remainingMethod = null;
+
+  function renderPaymentUI() {
+    document.getElementById("primary-cash-btn").classList.toggle("primary", primaryMethod === "cash");
+    document.getElementById("primary-card-btn").classList.toggle("primary", primaryMethod === "card");
+    document.getElementById("primary-transfer-btn").classList.toggle("primary", primaryMethod === "transfer");
+
+    if (primaryMethod === "card" || primaryMethod === "transfer") {
+      mixedPaymentContainer.style.display = "none";
+      paymentTotalPreview.style.display = "none";
+      remainingContainer.style.display = "none";
+      changeLine.style.display = "none";
+      paymentHint.textContent = "";
+      confirmBtn.disabled = false;
+      return;
+    }
+
+    mixedPaymentContainer.style.display = "";
+    paymentTotalPreview.style.display = "";
+    changeLine.style.display = "";
+    syncCashPaymentState();
+  }
+
+  window.setPrimaryMethod = function setPrimaryMethod(method) {
+    primaryMethod = method;
+    renderPaymentUI();
+  };
+
+  function setRemainingMethod(method) {
+    remainingMethod = method;
+    document.getElementById("remaining-card-btn").classList.toggle("primary", method === "card");
+    document.getElementById("remaining-transfer-btn").classList.toggle("primary", method === "transfer");
+    syncCashPaymentState();
+  }
+
+  const splitBtn = document.createElement("button");
+  splitBtn.className = "ghost";
+  splitBtn.textContent = "Dividir cuenta";
+  splitBtn.setAttribute("onclick", "openSplitModal()");
   var primaryMethod = null;
   var remainingMethod = null;
 
@@ -1945,9 +1990,143 @@ function renderPaymentPreviewTicket(order) {
   cancelBtn.textContent = "Cancelar";
   cancelBtn.addEventListener("click", () => renderCart());
 
-  actions.append(confirmBtn, cancelBtn);
+  actions.append(splitBtn, confirmBtn, cancelBtn);
   cartItems.appendChild(actions);
   renderPaymentUI();
+}
+
+function calculateGuestTotals(order) {
+
+  var totals = {};
+
+  order.guests.forEach(function(g) {
+    totals[g.id] = 0;
+  });
+
+  order.items.forEach(function(item) {
+
+    var guestId = item.guestId;
+
+    // calcular base
+    var qty = typeof item.qty === "number" ? item.qty : 0;
+    var unit = typeof item.unitPrice === "number" ? item.unitPrice : 0;
+    var lineTotal = qty * unit;
+
+    // calcular extras
+    var extrasTotal = 0;
+
+    if (item.meta && Array.isArray(item.meta.extras)) {
+      for (var i = 0; i < item.meta.extras.length; i++) {
+        var extra = item.meta.extras[i];
+
+        var extraQty = typeof extra.qty === "number" ? extra.qty : 0;
+        var extraUnit = typeof extra.unitPrice === "number" ? extra.unitPrice : 0;
+
+        extrasTotal += extraQty * extraUnit;
+      }
+    }
+
+    var total = lineTotal + extrasTotal;
+
+    if (guestId && totals[guestId] !== undefined) {
+      totals[guestId] += total;
+    }
+  });
+
+  return totals;
+}
+
+function renderSplitModal() {
+  if (!currentOrder) return;
+  var overlay = document.getElementById("split-modal-overlay");
+  if (!overlay) return;
+  var guests = Array.isArray(currentOrder.guests) ? currentOrder.guests : [];
+  var items = Array.isArray(currentOrder.items) ? currentOrder.items : [];
+  var guestList = guests.map(function(g) {
+    return "<li>" + g.name + " (" + g.id + ")</li>";
+  }).join("");
+  var options = guests.map(function(g) {
+    return '<option value="' + g.id + '">' + g.name + "</option>";
+  }).join("");
+  var itemsList = items.map(function(item, index) {
+    var itemLabel = (item.qty || 0) + "x " + (item.name || "Item");
+    return `
+      <div class="cart-item">
+        <span>${itemLabel}</span>
+        <select onchange="assignItemToGuest(${index}, this.value)">
+          <option value="">Sin asignar</option>
+          ${options}
+        </select>
+      </div>
+    `;
+  }).join("");
+  var totals = calculateGuestTotals(currentOrder);
+  var totalsRows = guests.map(function(g) {
+    return "<div>" + g.name + " \u2192 " + formatPrice(totals[g.id] || 0) + "</div>";
+  }).join("");
+
+  overlay.innerHTML = `
+    <div class="history-modal-content">
+      <div class="history-modal-header">
+        <strong>Dividir cuenta</strong>
+        <button type="button" class="ghost" onclick="closeSplitModal()">Cerrar</button>
+      </div>
+      <div class="cart-item">
+        <strong>Personas</strong>
+        <ul>${guestList || "<li>Sin personas</li>"}</ul>
+        <button type="button" class="ghost" onclick="addGuest()">+ agregar persona</button>
+      </div>
+      <div class="cart-item">
+        <strong>Items</strong>
+        ${itemsList || "<p>Sin items</p>"}
+      </div>
+      <div class="cart-item">
+        <strong>Totales por persona</strong>
+        ${totalsRows || "<p>Sin asignaciones</p>"}
+      </div>
+    </div>
+  `;
+  overlay.classList.remove("hidden");
+}
+
+function openSplitModal() {
+  if (!currentOrder) return;
+  var overlay = document.getElementById("split-modal-overlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "split-modal-overlay";
+    overlay.className = "history-modal hidden";
+    document.body.appendChild(overlay);
+  }
+  renderSplitModal();
+}
+
+function closeSplitModal() {
+  var overlay = document.getElementById("split-modal-overlay");
+  if (!overlay) return;
+  overlay.classList.add("hidden");
+}
+
+function addGuest() {
+  if (!currentOrder) return;
+  if (!currentOrder.guests) {
+    currentOrder.guests = [];
+  }
+  var id = "g" + Date.now();
+
+  currentOrder.guests.push({
+    id: id,
+    name: "Persona"
+  });
+
+  renderSplitModal();
+}
+
+function assignItemToGuest(index, guestId) {
+  if (!currentOrder || !Array.isArray(currentOrder.items)) return;
+  if (!currentOrder.items[index]) return;
+  currentOrder.items[index].guestId = guestId;
+  renderSplitModal();
 }
 
 function startAppendOrder(order) {
