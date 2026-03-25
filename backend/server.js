@@ -996,7 +996,7 @@ function hasExportAccess(req) {
 function getFilteredOrdersForExport(req) {
   var include = (req.query && req.query.include) ? String(req.query.include) : 'paid';
   var range = (req.query && req.query.range) ? String(req.query.range) : 'week';
-  var date = req.query && req.query.date;
+  var date = req.query.date;
   var bounds = getRangeBounds(range);
   var orders = loadOrders() || [];
   var filtered = [];
