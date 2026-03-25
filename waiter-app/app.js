@@ -1704,9 +1704,6 @@ function renderPaymentPreviewTicket(order) {
     mixedPaymentContainer,
     paymentTotalPreview,
     remainingContainer,
-    methodLabel,
-    methodSelect,
-    cashFields,
     changeLine,
     paymentHint
   );
@@ -1767,7 +1764,7 @@ function renderPaymentPreviewTicket(order) {
 
     if (!paymentMethod) {
       cashFields.style.display = "none";
-      paymentHint.textContent = "Selecciona un método de pago.";
+      paymentHint.textContent = "";
       confirmBtn.disabled = true;
       return;
     }
