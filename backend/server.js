@@ -284,16 +284,19 @@ function getOperationalDate(order) {
 
     var d = new Date(dateValue);
 
-    var local = new Date(d.getTime() - (d.getTimezoneOffset() * 60000));
-    var hours = local.getHours();
+    // Convertir UTC → México (UTC-6)
+    var mexicoOffsetMs = -6 * 60 * 60 * 1000;
+    var local = new Date(d.getTime() + mexicoOffsetMs);
+
+    var hours = local.getUTCHours(); // usamos UTC porque ya ajustamos offset
 
     if (hours < 18) {
-      local.setDate(local.getDate() - 1);
+      local.setUTCDate(local.getUTCDate() - 1);
     }
 
-    var year = local.getFullYear();
-    var month = String(local.getMonth() + 1).padStart(2, '0');
-    var day = String(local.getDate()).padStart(2, '0');
+    var year = local.getUTCFullYear();
+    var month = String(local.getUTCMonth() + 1).padStart(2, '0');
+    var day = String(local.getUTCDate()).padStart(2, '0');
 
     return year + '-' + month + '-' + day;
   } catch (err) {
