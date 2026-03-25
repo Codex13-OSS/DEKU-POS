@@ -1414,15 +1414,38 @@ function renderCashClosingSummary() {
     historyCashClosingDate.textContent = `Fecha: ${dateKey}`;
   }
   historyCashClosingList.innerHTML = lines || "<p>No hay comandas pagadas para esta fecha.</p>";
-  const totals = orders.reduce((sum, order) => {
-    const total = calculateOrderTotal(order);
+  const totals = orders.reduce(function(sum, order) {
+    var total = calculateOrderTotal(order);
     sum.total += total;
-    if (order.paymentMethod === "card" || order.paymentMethod === "transfer") {
-      sum.totalDigital += total;
+
+    // NUEVO: usar payments si existe
+    if (order.payments && order.payments.length > 0) {
+
+      for (var i = 0; i < order.payments.length; i++) {
+        var p = order.payments[i];
+
+        if (p.method === "cash") {
+          sum.totalCash += Number(p.amount) || 0;
+        }
+
+        if (p.method === "card" || p.method === "transfer") {
+          sum.totalDigital += Number(p.amount) || 0;
+        }
+      }
+
     } else {
-      sum.totalCash += total;
+
+      // fallback legacy (NO eliminar)
+      if (order.paymentMethod === "card" || order.paymentMethod === "transfer") {
+        sum.totalDigital += total;
+      } else {
+        sum.totalCash += total;
+      }
+
     }
+
     return sum;
+
   }, { total: 0, totalCash: 0, totalDigital: 0 });
   historyCashClosingTotal.textContent = formatPrice(totals.total);
   if (historyCashClosingCash) {
@@ -1649,16 +1672,29 @@ function renderPaymentPreviewTicket(order) {
   mixedPaymentContainer.innerHTML = `
     <label>Efectivo:</label>
     <input type="number" id="pay-cash" placeholder="0">
-
-    <label>Tarjeta:</label>
-    <input type="number" id="pay-card" placeholder="0">
-
-    <label>Transferencia:</label>
-    <input type="number" id="pay-transfer" placeholder="0">
   `;
 
   const paymentTotalPreview = document.createElement("div");
   paymentTotalPreview.id = "payment-total-preview";
+
+  const paymentMethodSelector = document.createElement("div");
+  paymentMethodSelector.id = "payment-method-selector";
+  paymentMethodSelector.innerHTML = `
+    <button type="button" id="primary-cash-btn" onclick="setPrimaryMethod('cash')">Efectivo</button>
+    <button type="button" id="primary-card-btn" onclick="setPrimaryMethod('card')">Tarjeta</button>
+    <button type="button" id="primary-transfer-btn" onclick="setPrimaryMethod('transfer')">Transferencia</button>
+  `;
+
+  const remainingContainer = document.createElement("div");
+  remainingContainer.id = "remaining-payment-container";
+  remainingContainer.style.display = "none";
+  remainingContainer.innerHTML = `
+    <small id="remaining-amount-text"></small>
+    <div>
+      <button type="button" id="remaining-card-btn">Tarjeta</button>
+      <button type="button" id="remaining-transfer-btn">Transferencia</button>
+    </div>
+  `;
 
   const methodLabel = document.createElement("label");
   methodLabel.textContent = "Selecciona método";
@@ -1696,11 +1732,10 @@ function renderPaymentPreviewTicket(order) {
   paymentBox.append(
     paymentTitle,
     paymentTotal,
+    paymentMethodSelector,
     mixedPaymentContainer,
     paymentTotalPreview,
-    methodLabel,
-    methodSelect,
-    cashFields,
+    remainingContainer,
     changeLine,
     paymentHint
   );
@@ -1713,28 +1748,75 @@ function renderPaymentPreviewTicket(order) {
   confirmBtn.className = "primary";
   confirmBtn.textContent = "CONFIRMAR PAGO";
   confirmBtn.disabled = true;
+  var primaryMethod = null;
+  var remainingMethod = null;
+
+  function renderPaymentUI() {
+    document.getElementById("primary-cash-btn").classList.toggle("primary", primaryMethod === "cash");
+    document.getElementById("primary-card-btn").classList.toggle("primary", primaryMethod === "card");
+    document.getElementById("primary-transfer-btn").classList.toggle("primary", primaryMethod === "transfer");
+
+    if (primaryMethod === "card" || primaryMethod === "transfer") {
+      mixedPaymentContainer.style.display = "none";
+      paymentTotalPreview.style.display = "none";
+      remainingContainer.style.display = "none";
+      changeLine.style.display = "none";
+      paymentHint.textContent = "";
+      confirmBtn.disabled = false;
+      return;
+    }
+
+    mixedPaymentContainer.style.display = "";
+    paymentTotalPreview.style.display = "";
+    changeLine.style.display = "";
+    syncCashPaymentState();
+  }
+
+  window.setPrimaryMethod = function setPrimaryMethod(method) {
+    primaryMethod = method;
+    renderPaymentUI();
+  };
+
+  function setRemainingMethod(method) {
+    remainingMethod = method;
+    document.getElementById("remaining-card-btn").classList.toggle("primary", method === "card");
+    document.getElementById("remaining-transfer-btn").classList.toggle("primary", method === "transfer");
+    syncCashPaymentState();
+  }
 
   function syncCashPaymentState() {
+    if (primaryMethod !== "cash") {
+      remainingContainer.style.display = "none";
+      paymentHint.textContent = "";
+      confirmBtn.disabled = !primaryMethod;
+      return;
+    }
     var cash = Number(document.getElementById("pay-cash").value) || 0;
-    var card = Number(document.getElementById("pay-card").value) || 0;
-    var transfer = Number(document.getElementById("pay-transfer").value) || 0;
     var currentOrder = { total: total };
     var totalToPay = currentOrder.total || 0;
-    var sum = cash + card + transfer;
+    var remaining = totalToPay - cash;
+    var remainingToCover = remaining > 0 ? remaining : 0;
+    var sum = cash + remainingToCover;
     document.getElementById("payment-total-preview").innerText =
       "Pagado: $" + sum + " / $" + totalToPay;
 
-    var payments = [];
-    if (cash > 0) payments.push({ method: "cash", amount: cash });
-    if (card > 0) payments.push({ method: "card", amount: card });
-    if (transfer > 0) payments.push({ method: "transfer", amount: transfer });
-
-    if (payments.length > 0) {
+    if (cash > 0) {
       cashFields.style.display = "";
-      paymentHint.textContent = sum < totalToPay ? "Pago insuficiente" : "";
-      confirmBtn.disabled = sum < totalToPay;
+      changeValue.textContent = formatPrice(cash >= totalToPay ? cash - totalToPay : 0);
+      if (remaining > 0) {
+        remainingContainer.style.display = "";
+        document.getElementById("remaining-amount-text").textContent = `Faltan: ${formatPrice(remaining)}`;
+        paymentHint.textContent = remainingMethod ? "" : "Selecciona cómo se paga el restante";
+        confirmBtn.disabled = !remainingMethod;
+      } else {
+        remainingContainer.style.display = "none";
+        paymentHint.textContent = "";
+        confirmBtn.disabled = false;
+      }
       return;
     }
+    remainingContainer.style.display = "none";
+    remainingMethod = null;
 
     const paymentMethod = methodSelect.value;
     const rawValue = cashInput.value.trim();
@@ -1747,7 +1829,7 @@ function renderPaymentPreviewTicket(order) {
 
     if (!paymentMethod) {
       cashFields.style.display = "none";
-      paymentHint.textContent = "Selecciona un método de pago.";
+      paymentHint.textContent = "";
       confirmBtn.disabled = true;
       return;
     }
@@ -1782,21 +1864,49 @@ function renderPaymentPreviewTicket(order) {
   methodSelect.addEventListener("change", syncCashPaymentState);
   cashInput.addEventListener("input", syncCashPaymentState);
   document.getElementById("pay-cash").addEventListener("input", syncCashPaymentState);
-  document.getElementById("pay-card").addEventListener("input", syncCashPaymentState);
-  document.getElementById("pay-transfer").addEventListener("input", syncCashPaymentState);
+  document.getElementById("remaining-card-btn").addEventListener("click", () => setRemainingMethod("card"));
+  document.getElementById("remaining-transfer-btn").addEventListener("click", () => setRemainingMethod("transfer"));
   confirmBtn.addEventListener("click", async () => {
+    if (!primaryMethod) {
+      alert("Selecciona método de pago");
+      return;
+    }
+    if (primaryMethod === "card" || primaryMethod === "transfer") {
+      var cardOrTransferPayments = [{
+        method: primaryMethod,
+        amount: total
+      }];
+      const updatedPrimary = await updateHistoryStatus(order.id, "paid", {
+        status: "paid",
+        payments: cardOrTransferPayments
+      });
+      if (!updatedPrimary) {
+        return;
+      }
+      resetLocalTicketState();
+      await fetchHistoryOrders();
+      renderActivePanel();
+      return;
+    }
+
     var cash = Number(document.getElementById("pay-cash").value) || 0;
-    var card = Number(document.getElementById("pay-card").value) || 0;
-    var transfer = Number(document.getElementById("pay-transfer").value) || 0;
-    var payments = [];
-    if (cash > 0) payments.push({ method: "cash", amount: cash });
-    if (card > 0) payments.push({ method: "card", amount: card });
-    if (transfer > 0) payments.push({ method: "transfer", amount: transfer });
     var currentOrder = { total: total };
     var totalToPay = currentOrder.total || 0;
-    var sum = cash + card + transfer;
+    var remaining = totalToPay - cash;
+    var payments = [];
+    if (cash > 0) {
+      payments.push({ method: "cash", amount: cash });
+    }
+    if (remaining > 0 && remainingMethod) {
+      payments.push({ method: remainingMethod, amount: remaining });
+    }
+    var sum = cash + (remaining > 0 ? remaining : 0);
     if (payments.length > 0 && sum < totalToPay) {
       alert("Pago insuficiente");
+      return;
+    }
+    if (remaining > 0 && !remainingMethod) {
+      alert("Selecciona cómo se paga el restante");
       return;
     }
 
@@ -1804,6 +1914,7 @@ function renderPaymentPreviewTicket(order) {
     var extra;
     if (payments.length > 0) {
       extra = {
+        status: "paid",
         payments
       };
     } else {
@@ -1836,7 +1947,7 @@ function renderPaymentPreviewTicket(order) {
 
   actions.append(confirmBtn, cancelBtn);
   cartItems.appendChild(actions);
-  syncCashPaymentState();
+  renderPaymentUI();
 }
 
 function startAppendOrder(order) {
