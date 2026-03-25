@@ -1753,6 +1753,41 @@ function renderPaymentPreviewTicket(order) {
   confirmBtn.className = "primary";
   confirmBtn.textContent = "CONFIRMAR PAGO";
   confirmBtn.disabled = true;
+  var primaryMethod = null;
+  var remainingMethod = null;
+
+  function renderPaymentUI() {
+    document.getElementById("primary-cash-btn").classList.toggle("primary", primaryMethod === "cash");
+    document.getElementById("primary-card-btn").classList.toggle("primary", primaryMethod === "card");
+    document.getElementById("primary-transfer-btn").classList.toggle("primary", primaryMethod === "transfer");
+
+    if (primaryMethod === "card" || primaryMethod === "transfer") {
+      mixedPaymentContainer.style.display = "none";
+      paymentTotalPreview.style.display = "none";
+      remainingContainer.style.display = "none";
+      changeLine.style.display = "none";
+      paymentHint.textContent = "";
+      confirmBtn.disabled = false;
+      return;
+    }
+
+    mixedPaymentContainer.style.display = "";
+    paymentTotalPreview.style.display = "";
+    changeLine.style.display = "";
+    syncCashPaymentState();
+  }
+
+  window.setPrimaryMethod = function setPrimaryMethod(method) {
+    primaryMethod = method;
+    renderPaymentUI();
+  };
+
+  function setRemainingMethod(method) {
+    remainingMethod = method;
+    document.getElementById("remaining-card-btn").classList.toggle("primary", method === "card");
+    document.getElementById("remaining-transfer-btn").classList.toggle("primary", method === "transfer");
+    syncCashPaymentState();
+  }
 
   const splitBtn = document.createElement("button");
   splitBtn.className = "ghost";
