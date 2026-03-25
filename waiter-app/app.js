@@ -1649,16 +1649,21 @@ function renderPaymentPreviewTicket(order) {
   mixedPaymentContainer.innerHTML = `
     <label>Efectivo:</label>
     <input type="number" id="pay-cash" placeholder="0">
-
-    <label>Tarjeta:</label>
-    <input type="number" id="pay-card" placeholder="0">
-
-    <label>Transferencia:</label>
-    <input type="number" id="pay-transfer" placeholder="0">
   `;
 
   const paymentTotalPreview = document.createElement("div");
   paymentTotalPreview.id = "payment-total-preview";
+
+  const remainingContainer = document.createElement("div");
+  remainingContainer.id = "remaining-payment-container";
+  remainingContainer.style.display = "none";
+  remainingContainer.innerHTML = `
+    <small id="remaining-amount-text"></small>
+    <div>
+      <button type="button" id="remaining-card-btn">Tarjeta</button>
+      <button type="button" id="remaining-transfer-btn">Transferencia</button>
+    </div>
+  `;
 
   const methodLabel = document.createElement("label");
   methodLabel.textContent = "Selecciona método";
@@ -1698,9 +1703,7 @@ function renderPaymentPreviewTicket(order) {
     paymentTotal,
     mixedPaymentContainer,
     paymentTotalPreview,
-    methodLabel,
-    methodSelect,
-    cashFields,
+    remainingContainer,
     changeLine,
     paymentHint
   );
@@ -1713,28 +1716,42 @@ function renderPaymentPreviewTicket(order) {
   confirmBtn.className = "primary";
   confirmBtn.textContent = "CONFIRMAR PAGO";
   confirmBtn.disabled = true;
+  var remainingMethod = null;
+
+  function setRemainingMethod(method) {
+    remainingMethod = method;
+    document.getElementById("remaining-card-btn").classList.toggle("primary", method === "card");
+    document.getElementById("remaining-transfer-btn").classList.toggle("primary", method === "transfer");
+    syncCashPaymentState();
+  }
 
   function syncCashPaymentState() {
     var cash = Number(document.getElementById("pay-cash").value) || 0;
-    var card = Number(document.getElementById("pay-card").value) || 0;
-    var transfer = Number(document.getElementById("pay-transfer").value) || 0;
     var currentOrder = { total: total };
     var totalToPay = currentOrder.total || 0;
-    var sum = cash + card + transfer;
+    var remaining = totalToPay - cash;
+    var remainingToCover = remaining > 0 ? remaining : 0;
+    var sum = cash + remainingToCover;
     document.getElementById("payment-total-preview").innerText =
       "Pagado: $" + sum + " / $" + totalToPay;
 
-    var payments = [];
-    if (cash > 0) payments.push({ method: "cash", amount: cash });
-    if (card > 0) payments.push({ method: "card", amount: card });
-    if (transfer > 0) payments.push({ method: "transfer", amount: transfer });
-
-    if (payments.length > 0) {
+    if (cash > 0) {
       cashFields.style.display = "";
-      paymentHint.textContent = sum < totalToPay ? "Pago insuficiente" : "";
-      confirmBtn.disabled = sum < totalToPay;
+      changeValue.textContent = formatPrice(cash >= totalToPay ? cash - totalToPay : 0);
+      if (remaining > 0) {
+        remainingContainer.style.display = "";
+        document.getElementById("remaining-amount-text").textContent = `Faltan: ${formatPrice(remaining)}`;
+        paymentHint.textContent = remainingMethod ? "" : "Selecciona cómo se paga el restante";
+        confirmBtn.disabled = !remainingMethod;
+      } else {
+        remainingContainer.style.display = "none";
+        paymentHint.textContent = "";
+        confirmBtn.disabled = false;
+      }
       return;
     }
+    remainingContainer.style.display = "none";
+    remainingMethod = null;
 
     const paymentMethod = methodSelect.value;
     const rawValue = cashInput.value.trim();
@@ -1747,7 +1764,7 @@ function renderPaymentPreviewTicket(order) {
 
     if (!paymentMethod) {
       cashFields.style.display = "none";
-      paymentHint.textContent = "Selecciona un método de pago.";
+      paymentHint.textContent = "";
       confirmBtn.disabled = true;
       return;
     }
@@ -1782,21 +1799,27 @@ function renderPaymentPreviewTicket(order) {
   methodSelect.addEventListener("change", syncCashPaymentState);
   cashInput.addEventListener("input", syncCashPaymentState);
   document.getElementById("pay-cash").addEventListener("input", syncCashPaymentState);
-  document.getElementById("pay-card").addEventListener("input", syncCashPaymentState);
-  document.getElementById("pay-transfer").addEventListener("input", syncCashPaymentState);
+  document.getElementById("remaining-card-btn").addEventListener("click", () => setRemainingMethod("card"));
+  document.getElementById("remaining-transfer-btn").addEventListener("click", () => setRemainingMethod("transfer"));
   confirmBtn.addEventListener("click", async () => {
     var cash = Number(document.getElementById("pay-cash").value) || 0;
-    var card = Number(document.getElementById("pay-card").value) || 0;
-    var transfer = Number(document.getElementById("pay-transfer").value) || 0;
-    var payments = [];
-    if (cash > 0) payments.push({ method: "cash", amount: cash });
-    if (card > 0) payments.push({ method: "card", amount: card });
-    if (transfer > 0) payments.push({ method: "transfer", amount: transfer });
     var currentOrder = { total: total };
     var totalToPay = currentOrder.total || 0;
-    var sum = cash + card + transfer;
+    var remaining = totalToPay - cash;
+    var payments = [];
+    if (cash > 0) {
+      payments.push({ method: "cash", amount: cash });
+    }
+    if (remaining > 0 && remainingMethod) {
+      payments.push({ method: remainingMethod, amount: remaining });
+    }
+    var sum = cash + (remaining > 0 ? remaining : 0);
     if (payments.length > 0 && sum < totalToPay) {
       alert("Pago insuficiente");
+      return;
+    }
+    if (remaining > 0 && !remainingMethod) {
+      alert("Selecciona cómo se paga el restante");
       return;
     }
 
@@ -1804,6 +1827,7 @@ function renderPaymentPreviewTicket(order) {
     var extra;
     if (payments.length > 0) {
       extra = {
+        status: "paid",
         payments
       };
     } else {
