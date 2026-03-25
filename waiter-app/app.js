@@ -1414,15 +1414,38 @@ function renderCashClosingSummary() {
     historyCashClosingDate.textContent = `Fecha: ${dateKey}`;
   }
   historyCashClosingList.innerHTML = lines || "<p>No hay comandas pagadas para esta fecha.</p>";
-  const totals = orders.reduce((sum, order) => {
-    const total = calculateOrderTotal(order);
+  const totals = orders.reduce(function(sum, order) {
+    var total = calculateOrderTotal(order);
     sum.total += total;
-    if (order.paymentMethod === "card" || order.paymentMethod === "transfer") {
-      sum.totalDigital += total;
+
+    // NUEVO: usar payments si existe
+    if (order.payments && order.payments.length > 0) {
+
+      for (var i = 0; i < order.payments.length; i++) {
+        var p = order.payments[i];
+
+        if (p.method === "cash") {
+          sum.totalCash += Number(p.amount) || 0;
+        }
+
+        if (p.method === "card" || p.method === "transfer") {
+          sum.totalDigital += Number(p.amount) || 0;
+        }
+      }
+
     } else {
-      sum.totalCash += total;
+
+      // fallback legacy (NO eliminar)
+      if (order.paymentMethod === "card" || order.paymentMethod === "transfer") {
+        sum.totalDigital += total;
+      } else {
+        sum.totalCash += total;
+      }
+
     }
+
     return sum;
+
   }, { total: 0, totalCash: 0, totalDigital: 0 });
   historyCashClosingTotal.textContent = formatPrice(totals.total);
   if (historyCashClosingCash) {
