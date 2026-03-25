@@ -186,6 +186,36 @@ function canTransition(from, to) {
   return false;
 }
 
+function normalizePayments(order) {
+  if (!order) return null;
+
+  if (Array.isArray(order.payments) && order.payments.length > 0) {
+    return order.payments;
+  }
+
+  if (order.paymentMethod) {
+    var total = order && order.totals && typeof order.totals.total === "number"
+      ? order.totals.total
+      : 0;
+
+    return [{
+      method: order.paymentMethod,
+      amount: total
+    }];
+  }
+
+  return null;
+}
+
+function getPaymentsTotal(payments) {
+  if (!Array.isArray(payments)) return 0;
+  var sum = 0;
+  for (var i = 0; i < payments.length; i++) {
+    sum += Number(payments[i].amount) || 0;
+  }
+  return sum;
+}
+
 async function updateOrderStatus(id, status, meta = {}) {
   const orders = loadOrders();
   const order = orders.find((item) => item.id === id);
@@ -200,31 +230,87 @@ async function updateOrderStatus(id, status, meta = {}) {
   }
   order.status = status;
   if (status === "paid") {
-    const total = order && order.totals && typeof order.totals.total === "number"
-      ? order.totals.total
-      : 0;
-    const validPaymentMethods = ["cash", "card", "transfer"];
+    if (Array.isArray(meta.payments)) {
+      if (meta.payments.length === 0) {
+        return { error: "Payments vacío." };
+      }
+      var validMethods = ["cash", "card", "transfer"];
 
-    if (!meta.paymentMethod || !validPaymentMethods.includes(meta.paymentMethod)) {
-      return { error: "Método de pago inválido." };
-    }
+      var cleanPayments = [];
 
-    if (meta.paymentMethod === "cash") {
-      const received = Number(meta.cashReceived);
+      for (var i = 0; i < meta.payments.length; i++) {
+        var p = meta.payments[i];
 
-      if (!Number.isFinite(received) || received < total) {
-        return { error: "Monto recibido insuficiente." };
+        if (!p || !validMethods.includes(p.method)) {
+          return { error: "Método de pago inválido en payments." };
+        }
+
+        cleanPayments.push({
+          method: String(p.method),
+          amount: Number(p.amount) || 0
+        });
       }
 
-      order.paymentMethod = "cash";
-      order.cashReceived = received;
-      order.changeGiven = received - total;
+      order.payments = cleanPayments;
+
+      var total = order && order.totals && typeof order.totals.total === "number"
+        ? order.totals.total
+        : 0;
+
+      var paidTotal = getPaymentsTotal(order.payments);
+
+      if (paidTotal < total) {
+        return { error: "Pago insuficiente." };
+      }
+
+      // Compatibilidad legacy (rellenar campos antiguos)
+      var cashTotal = 0;
+
+      for (var j = 0; j < order.payments.length; j++) {
+        if (order.payments[j].method === "cash") {
+          cashTotal += order.payments[j].amount;
+        }
+      }
+
+      if (cashTotal > 0) {
+        order.paymentMethod = "cash";
+        order.cashReceived = cashTotal;
+        order.changeGiven = cashTotal - total;
+      } else {
+        order.paymentMethod = order.payments[0].method;
+        order.changeGiven = 0;
+        delete order.cashReceived;
+      }
+
+      order.paidAt = new Date().toISOString();
+
     } else {
-      order.paymentMethod = meta.paymentMethod;
-      order.changeGiven = 0;
-      delete order.cashReceived;
+      const total = order && order.totals && typeof order.totals.total === "number"
+        ? order.totals.total
+        : 0;
+      const validPaymentMethods = ["cash", "card", "transfer"];
+
+      if (!meta.paymentMethod || !validPaymentMethods.includes(meta.paymentMethod)) {
+        return { error: "Método de pago inválido." };
+      }
+
+      if (meta.paymentMethod === "cash") {
+        const received = Number(meta.cashReceived);
+
+        if (!Number.isFinite(received) || received < total) {
+          return { error: "Monto recibido insuficiente." };
+        }
+
+        order.paymentMethod = "cash";
+        order.cashReceived = received;
+        order.changeGiven = received - total;
+      } else {
+        order.paymentMethod = meta.paymentMethod;
+        order.changeGiven = 0;
+        delete order.cashReceived;
+      }
+      order.paidAt = new Date().toISOString();
     }
-    order.paidAt = new Date().toISOString();
   }
   if (status === "cancelled") {
     order.cancelledAt = new Date().toISOString();
@@ -411,6 +497,27 @@ function buildOrdersCsvRow(order) {
   var sentToKitchenAt = o.sentToKitchenAt || null;
   var deliveredAt = o.deliveredAt || null;
   var paidAt = o.paidAt || null;
+  var payments = normalizePayments(o);
+
+  var paymentBreakdown = '';
+  var cashTotal = 0;
+  var cardTotal = 0;
+  var transferTotal = 0;
+
+  if (payments) {
+    var parts = [];
+
+    for (var i = 0; i < payments.length; i++) {
+      var p = payments[i];
+      parts.push(p.method + ':' + p.amount);
+
+      if (p.method === 'cash') cashTotal += p.amount;
+      if (p.method === 'card') cardTotal += p.amount;
+      if (p.method === 'transfer') transferTotal += p.amount;
+    }
+
+    paymentBreakdown = parts.join('|');
+  }
 
   return [
     csvEscape(o.id || ''),
@@ -427,7 +534,11 @@ function buildOrdersCsvRow(order) {
     csvEscape(diffSeconds(deliveredAt, paidAt)),
     csvEscape(diffSeconds(o.createdAt, paidAt)),
     csvEscape(itemsData.itemsCount),
-    csvEscape(itemsData.itemsSummary)
+    csvEscape(itemsData.itemsSummary),
+    csvEscape(paymentBreakdown),
+    csvEscape(cashTotal),
+    csvEscape(cardTotal),
+    csvEscape(transferTotal)
   ];
 }
 
@@ -464,7 +575,11 @@ function ordersToCsvRows(orders) {
     'service_time_seconds',
     'total_time_seconds',
     'items_count',
-    'items_summary'
+    'items_summary',
+    'payment_breakdown',
+    'cash_total',
+    'card_total',
+    'transfer_total'
   ].join(','));
 
   for (var i = 0; i < orders.length; i++) {
@@ -795,7 +910,7 @@ app.post("/api/orders", (req, res) => {
 
 app.patch("/api/orders/:id", async (req, res) => {
   const { id } = req.params;
-  const { status, cancelReason, cashReceived, changeGiven, paymentMethod } = req.body;
+  const { status, cancelReason, cashReceived, changeGiven, paymentMethod, payments } = req.body;
   if (!status || !["pending", "preparing", "ready", "delivered", "paid", "cancelled"].includes(status)) {
     return res.status(400).json({ error: "Status inválido." });
   }
@@ -803,7 +918,8 @@ app.patch("/api/orders/:id", async (req, res) => {
     cancelReason,
     cashReceived,
     changeGiven,
-    paymentMethod
+    paymentMethod,
+    payments
   });
   if (result.error) {
     const code = result.error === "Orden no encontrada." ? 404 : 400;

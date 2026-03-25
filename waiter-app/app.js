@@ -1644,6 +1644,22 @@ function renderPaymentPreviewTicket(order) {
   const paymentTotal = document.createElement("div");
   paymentTotal.textContent = `Total a cobrar: ${formatPrice(total)}`;
 
+  const mixedPaymentContainer = document.createElement("div");
+  mixedPaymentContainer.id = "mixed-payment-container";
+  mixedPaymentContainer.innerHTML = `
+    <label>Efectivo:</label>
+    <input type="number" id="pay-cash" placeholder="0">
+
+    <label>Tarjeta:</label>
+    <input type="number" id="pay-card" placeholder="0">
+
+    <label>Transferencia:</label>
+    <input type="number" id="pay-transfer" placeholder="0">
+  `;
+
+  const paymentTotalPreview = document.createElement("div");
+  paymentTotalPreview.id = "payment-total-preview";
+
   const methodLabel = document.createElement("label");
   methodLabel.textContent = "Selecciona método";
 
@@ -1677,7 +1693,17 @@ function renderPaymentPreviewTicket(order) {
   const paymentHint = document.createElement("small");
 
   cashFields.append(cashLabel, cashInput);
-  paymentBox.append(paymentTitle, paymentTotal, methodLabel, methodSelect, cashFields, changeLine, paymentHint);
+  paymentBox.append(
+    paymentTitle,
+    paymentTotal,
+    mixedPaymentContainer,
+    paymentTotalPreview,
+    methodLabel,
+    methodSelect,
+    cashFields,
+    changeLine,
+    paymentHint
+  );
   cartItems.appendChild(paymentBox);
 
   const actions = document.createElement("div");
@@ -1689,6 +1715,27 @@ function renderPaymentPreviewTicket(order) {
   confirmBtn.disabled = true;
 
   function syncCashPaymentState() {
+    var cash = Number(document.getElementById("pay-cash").value) || 0;
+    var card = Number(document.getElementById("pay-card").value) || 0;
+    var transfer = Number(document.getElementById("pay-transfer").value) || 0;
+    var currentOrder = { total: total };
+    var totalToPay = currentOrder.total || 0;
+    var sum = cash + card + transfer;
+    document.getElementById("payment-total-preview").innerText =
+      "Pagado: $" + sum + " / $" + totalToPay;
+
+    var payments = [];
+    if (cash > 0) payments.push({ method: "cash", amount: cash });
+    if (card > 0) payments.push({ method: "card", amount: card });
+    if (transfer > 0) payments.push({ method: "transfer", amount: transfer });
+
+    if (payments.length > 0) {
+      cashFields.style.display = "";
+      paymentHint.textContent = sum < totalToPay ? "Pago insuficiente" : "";
+      confirmBtn.disabled = sum < totalToPay;
+      return;
+    }
+
     const paymentMethod = methodSelect.value;
     const rawValue = cashInput.value.trim();
     const received = Number(rawValue);
@@ -1734,18 +1781,43 @@ function renderPaymentPreviewTicket(order) {
 
   methodSelect.addEventListener("change", syncCashPaymentState);
   cashInput.addEventListener("input", syncCashPaymentState);
+  document.getElementById("pay-cash").addEventListener("input", syncCashPaymentState);
+  document.getElementById("pay-card").addEventListener("input", syncCashPaymentState);
+  document.getElementById("pay-transfer").addEventListener("input", syncCashPaymentState);
   confirmBtn.addEventListener("click", async () => {
-    const paymentMethod = methodSelect.value;
-    const extra = {
-      paymentMethod,
-      changeGiven: 0
-    };
+    var cash = Number(document.getElementById("pay-cash").value) || 0;
+    var card = Number(document.getElementById("pay-card").value) || 0;
+    var transfer = Number(document.getElementById("pay-transfer").value) || 0;
+    var payments = [];
+    if (cash > 0) payments.push({ method: "cash", amount: cash });
+    if (card > 0) payments.push({ method: "card", amount: card });
+    if (transfer > 0) payments.push({ method: "transfer", amount: transfer });
+    var currentOrder = { total: total };
+    var totalToPay = currentOrder.total || 0;
+    var sum = cash + card + transfer;
+    if (payments.length > 0 && sum < totalToPay) {
+      alert("Pago insuficiente");
+      return;
+    }
 
-    if (paymentMethod === "cash") {
-      const received = Number(cashInput.value);
-      const change = received - total;
-      extra.cashReceived = received;
-      extra.changeGiven = change;
+    const paymentMethod = methodSelect.value;
+    var extra;
+    if (payments.length > 0) {
+      extra = {
+        payments
+      };
+    } else {
+      extra = {
+        paymentMethod,
+        changeGiven: 0
+      };
+
+      if (paymentMethod === "cash") {
+        const received = Number(cashInput.value);
+        const change = received - total;
+        extra.cashReceived = received;
+        extra.changeGiven = change;
+      }
     }
 
     const updated = await updateHistoryStatus(order.id, "paid", extra);
