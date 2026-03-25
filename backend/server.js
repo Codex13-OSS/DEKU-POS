@@ -277,6 +277,31 @@ function parseDateValue(value) {
   return isNaN(date.getTime()) ? null : date;
 }
 
+function getOperationalDate(order) {
+  try {
+    var dateValue = order.paidAt || order.createdAt;
+    if (!dateValue) return null;
+
+    var d = new Date(dateValue);
+
+    var local = new Date(d.getTime() - (d.getTimezoneOffset() * 60000));
+    var hours = local.getHours();
+
+    if (hours < 18) {
+      local.setDate(local.getDate() - 1);
+    }
+
+    var year = local.getFullYear();
+    var month = String(local.getMonth() + 1).padStart(2, '0');
+    var day = String(local.getDate()).padStart(2, '0');
+
+    return year + '-' + month + '-' + day;
+  } catch (err) {
+    console.error('getOperationalDate error:', err);
+    return null;
+  }
+}
+
 function pickOrderDateForRange(order) {
   // Prefer paidAt for sales-based ranges; fallback to createdAt
   return parseDateValue((order && order.paidAt) ? order.paidAt : (order && order.createdAt));
@@ -971,9 +996,8 @@ function hasExportAccess(req) {
 function getFilteredOrdersForExport(req) {
   var include = (req.query && req.query.include) ? String(req.query.include) : 'paid';
   var range = (req.query && req.query.range) ? String(req.query.range) : 'week';
-  var date = (req.query && req.query.date) ? String(req.query.date) : '';
-  var hasDateFilter = /^\d{4}-\d{2}-\d{2}$/.test(date);
-  var bounds = hasDateFilter ? null : getRangeBounds(range);
+  var date = req.query && req.query.date;
+  var bounds = getRangeBounds(range);
   var orders = loadOrders() || [];
   var filtered = [];
 
@@ -986,21 +1010,22 @@ function getFilteredOrdersForExport(req) {
     // Excluir canceladas siempre salvo include=all (si quieren auditar)
     if (include !== 'all' && o.status === 'cancelled') continue;
 
-    if (hasDateFilter) {
-      if (getCreatedAtDateKey(o) !== date) continue;
-      filtered.push(o);
-      continue;
+    // NUEVO: filtro por día operativo si viene ?date
+    if (date) {
+      var opDate = getOperationalDate(o);
+      if (opDate !== date) continue;
+    } else {
+      // comportamiento original
+      var d = pickOrderDateForRange(o);
+      if (!d || isNaN(d.getTime())) continue;
+      if (d < bounds.from || d > bounds.to) continue;
     }
-
-    var d = pickOrderDateForRange(o);
-    if (!d || isNaN(d.getTime())) continue;
-    if (d < bounds.from || d > bounds.to) continue;
     filtered.push(o);
   }
 
   filtered.sort(function(a, b) {
-    var da = hasDateFilter ? parseDateValue(a && a.createdAt) : pickOrderDateForRange(a);
-    var db = hasDateFilter ? parseDateValue(b && b.createdAt) : pickOrderDateForRange(b);
+    var da = date ? parseDateValue(a && a.createdAt) : pickOrderDateForRange(a);
+    var db = date ? parseDateValue(b && b.createdAt) : pickOrderDateForRange(b);
     var ta = da ? da.getTime() : 0;
     var tb = db ? db.getTime() : 0;
     return ta - tb;
