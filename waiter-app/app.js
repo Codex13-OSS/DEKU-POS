@@ -73,6 +73,7 @@ let orderFlowStep = 0;
 let historyViewMode = "active";
 let historyToggleButton = null;
 let activePanel = null;
+var currentOrder = null;
 
 function updateHistoryToggleButtonLabel() {
   if (!historyToggleButton) return;
@@ -1414,15 +1415,38 @@ function renderCashClosingSummary() {
     historyCashClosingDate.textContent = `Fecha: ${dateKey}`;
   }
   historyCashClosingList.innerHTML = lines || "<p>No hay comandas pagadas para esta fecha.</p>";
-  const totals = orders.reduce((sum, order) => {
-    const total = calculateOrderTotal(order);
+  const totals = orders.reduce(function(sum, order) {
+    var total = calculateOrderTotal(order);
     sum.total += total;
-    if (order.paymentMethod === "card" || order.paymentMethod === "transfer") {
-      sum.totalDigital += total;
+
+    // NUEVO: usar payments si existe
+    if (order.payments && order.payments.length > 0) {
+
+      for (var i = 0; i < order.payments.length; i++) {
+        var p = order.payments[i];
+
+        if (p.method === "cash") {
+          sum.totalCash += Number(p.amount) || 0;
+        }
+
+        if (p.method === "card" || p.method === "transfer") {
+          sum.totalDigital += Number(p.amount) || 0;
+        }
+      }
+
     } else {
-      sum.totalCash += total;
+
+      // fallback legacy (NO eliminar)
+      if (order.paymentMethod === "card" || order.paymentMethod === "transfer") {
+        sum.totalDigital += total;
+      } else {
+        sum.totalCash += total;
+      }
+
     }
+
     return sum;
+
   }, { total: 0, totalCash: 0, totalDigital: 0 });
   historyCashClosingTotal.textContent = formatPrice(totals.total);
   if (historyCashClosingCash) {
@@ -1586,6 +1610,10 @@ function renderHistoryTicket(order) {
 
 function renderPaymentPreviewTicket(order) {
   if (!order) return;
+  currentOrder = order;
+  if (!currentOrder.guests) {
+    currentOrder.guests = [];
+  }
 
   state.paymentPreviewOrderId = order.id;
   cartItems.innerHTML = "";
@@ -1649,16 +1677,29 @@ function renderPaymentPreviewTicket(order) {
   mixedPaymentContainer.innerHTML = `
     <label>Efectivo:</label>
     <input type="number" id="pay-cash" placeholder="0">
-
-    <label>Tarjeta:</label>
-    <input type="number" id="pay-card" placeholder="0">
-
-    <label>Transferencia:</label>
-    <input type="number" id="pay-transfer" placeholder="0">
   `;
 
   const paymentTotalPreview = document.createElement("div");
   paymentTotalPreview.id = "payment-total-preview";
+
+  const paymentMethodSelector = document.createElement("div");
+  paymentMethodSelector.id = "payment-method-selector";
+  paymentMethodSelector.innerHTML = `
+    <button type="button" id="primary-cash-btn" onclick="setPrimaryMethod('cash')">Efectivo</button>
+    <button type="button" id="primary-card-btn" onclick="setPrimaryMethod('card')">Tarjeta</button>
+    <button type="button" id="primary-transfer-btn" onclick="setPrimaryMethod('transfer')">Transferencia</button>
+  `;
+
+  const remainingContainer = document.createElement("div");
+  remainingContainer.id = "remaining-payment-container";
+  remainingContainer.style.display = "none";
+  remainingContainer.innerHTML = `
+    <small id="remaining-amount-text"></small>
+    <div>
+      <button type="button" id="remaining-card-btn">Tarjeta</button>
+      <button type="button" id="remaining-transfer-btn">Transferencia</button>
+    </div>
+  `;
 
   const methodLabel = document.createElement("label");
   methodLabel.textContent = "Selecciona método";
@@ -1696,11 +1737,10 @@ function renderPaymentPreviewTicket(order) {
   paymentBox.append(
     paymentTitle,
     paymentTotal,
+    paymentMethodSelector,
     mixedPaymentContainer,
     paymentTotalPreview,
-    methodLabel,
-    methodSelect,
-    cashFields,
+    remainingContainer,
     changeLine,
     paymentHint
   );
@@ -1714,27 +1754,79 @@ function renderPaymentPreviewTicket(order) {
   confirmBtn.textContent = "CONFIRMAR PAGO";
   confirmBtn.disabled = true;
 
+  const splitBtn = document.createElement("button");
+  splitBtn.className = "ghost";
+  splitBtn.textContent = "Dividir cuenta";
+  splitBtn.setAttribute("onclick", "openSplitModal()");
+  var primaryMethod = null;
+  var remainingMethod = null;
+
+  function renderPaymentUI() {
+    document.getElementById("primary-cash-btn").classList.toggle("primary", primaryMethod === "cash");
+    document.getElementById("primary-card-btn").classList.toggle("primary", primaryMethod === "card");
+    document.getElementById("primary-transfer-btn").classList.toggle("primary", primaryMethod === "transfer");
+
+    if (primaryMethod === "card" || primaryMethod === "transfer") {
+      mixedPaymentContainer.style.display = "none";
+      paymentTotalPreview.style.display = "none";
+      remainingContainer.style.display = "none";
+      changeLine.style.display = "none";
+      paymentHint.textContent = "";
+      confirmBtn.disabled = false;
+      return;
+    }
+
+    mixedPaymentContainer.style.display = "";
+    paymentTotalPreview.style.display = "";
+    changeLine.style.display = "";
+    syncCashPaymentState();
+  }
+
+  window.setPrimaryMethod = function setPrimaryMethod(method) {
+    primaryMethod = method;
+    renderPaymentUI();
+  };
+
+  function setRemainingMethod(method) {
+    remainingMethod = method;
+    document.getElementById("remaining-card-btn").classList.toggle("primary", method === "card");
+    document.getElementById("remaining-transfer-btn").classList.toggle("primary", method === "transfer");
+    syncCashPaymentState();
+  }
+
   function syncCashPaymentState() {
+    if (primaryMethod !== "cash") {
+      remainingContainer.style.display = "none";
+      paymentHint.textContent = "";
+      confirmBtn.disabled = !primaryMethod;
+      return;
+    }
     var cash = Number(document.getElementById("pay-cash").value) || 0;
-    var card = Number(document.getElementById("pay-card").value) || 0;
-    var transfer = Number(document.getElementById("pay-transfer").value) || 0;
     var currentOrder = { total: total };
     var totalToPay = currentOrder.total || 0;
-    var sum = cash + card + transfer;
+    var remaining = totalToPay - cash;
+    var remainingToCover = remaining > 0 ? remaining : 0;
+    var sum = cash + remainingToCover;
     document.getElementById("payment-total-preview").innerText =
       "Pagado: $" + sum + " / $" + totalToPay;
 
-    var payments = [];
-    if (cash > 0) payments.push({ method: "cash", amount: cash });
-    if (card > 0) payments.push({ method: "card", amount: card });
-    if (transfer > 0) payments.push({ method: "transfer", amount: transfer });
-
-    if (payments.length > 0) {
+    if (cash > 0) {
       cashFields.style.display = "";
-      paymentHint.textContent = sum < totalToPay ? "Pago insuficiente" : "";
-      confirmBtn.disabled = sum < totalToPay;
+      changeValue.textContent = formatPrice(cash >= totalToPay ? cash - totalToPay : 0);
+      if (remaining > 0) {
+        remainingContainer.style.display = "";
+        document.getElementById("remaining-amount-text").textContent = `Faltan: ${formatPrice(remaining)}`;
+        paymentHint.textContent = remainingMethod ? "" : "Selecciona cómo se paga el restante";
+        confirmBtn.disabled = !remainingMethod;
+      } else {
+        remainingContainer.style.display = "none";
+        paymentHint.textContent = "";
+        confirmBtn.disabled = false;
+      }
       return;
     }
+    remainingContainer.style.display = "none";
+    remainingMethod = null;
 
     const paymentMethod = methodSelect.value;
     const rawValue = cashInput.value.trim();
@@ -1747,7 +1839,7 @@ function renderPaymentPreviewTicket(order) {
 
     if (!paymentMethod) {
       cashFields.style.display = "none";
-      paymentHint.textContent = "Selecciona un método de pago.";
+      paymentHint.textContent = "";
       confirmBtn.disabled = true;
       return;
     }
@@ -1782,21 +1874,49 @@ function renderPaymentPreviewTicket(order) {
   methodSelect.addEventListener("change", syncCashPaymentState);
   cashInput.addEventListener("input", syncCashPaymentState);
   document.getElementById("pay-cash").addEventListener("input", syncCashPaymentState);
-  document.getElementById("pay-card").addEventListener("input", syncCashPaymentState);
-  document.getElementById("pay-transfer").addEventListener("input", syncCashPaymentState);
+  document.getElementById("remaining-card-btn").addEventListener("click", () => setRemainingMethod("card"));
+  document.getElementById("remaining-transfer-btn").addEventListener("click", () => setRemainingMethod("transfer"));
   confirmBtn.addEventListener("click", async () => {
+    if (!primaryMethod) {
+      alert("Selecciona método de pago");
+      return;
+    }
+    if (primaryMethod === "card" || primaryMethod === "transfer") {
+      var cardOrTransferPayments = [{
+        method: primaryMethod,
+        amount: total
+      }];
+      const updatedPrimary = await updateHistoryStatus(order.id, "paid", {
+        status: "paid",
+        payments: cardOrTransferPayments
+      });
+      if (!updatedPrimary) {
+        return;
+      }
+      resetLocalTicketState();
+      await fetchHistoryOrders();
+      renderActivePanel();
+      return;
+    }
+
     var cash = Number(document.getElementById("pay-cash").value) || 0;
-    var card = Number(document.getElementById("pay-card").value) || 0;
-    var transfer = Number(document.getElementById("pay-transfer").value) || 0;
-    var payments = [];
-    if (cash > 0) payments.push({ method: "cash", amount: cash });
-    if (card > 0) payments.push({ method: "card", amount: card });
-    if (transfer > 0) payments.push({ method: "transfer", amount: transfer });
     var currentOrder = { total: total };
     var totalToPay = currentOrder.total || 0;
-    var sum = cash + card + transfer;
+    var remaining = totalToPay - cash;
+    var payments = [];
+    if (cash > 0) {
+      payments.push({ method: "cash", amount: cash });
+    }
+    if (remaining > 0 && remainingMethod) {
+      payments.push({ method: remainingMethod, amount: remaining });
+    }
+    var sum = cash + (remaining > 0 ? remaining : 0);
     if (payments.length > 0 && sum < totalToPay) {
       alert("Pago insuficiente");
+      return;
+    }
+    if (remaining > 0 && !remainingMethod) {
+      alert("Selecciona cómo se paga el restante");
       return;
     }
 
@@ -1804,6 +1924,7 @@ function renderPaymentPreviewTicket(order) {
     var extra;
     if (payments.length > 0) {
       extra = {
+        status: "paid",
         payments
       };
     } else {
@@ -1834,9 +1955,143 @@ function renderPaymentPreviewTicket(order) {
   cancelBtn.textContent = "Cancelar";
   cancelBtn.addEventListener("click", () => renderCart());
 
-  actions.append(confirmBtn, cancelBtn);
+  actions.append(splitBtn, confirmBtn, cancelBtn);
   cartItems.appendChild(actions);
-  syncCashPaymentState();
+  renderPaymentUI();
+}
+
+function calculateGuestTotals(order) {
+
+  var totals = {};
+
+  order.guests.forEach(function(g) {
+    totals[g.id] = 0;
+  });
+
+  order.items.forEach(function(item) {
+
+    var guestId = item.guestId;
+
+    // calcular base
+    var qty = typeof item.qty === "number" ? item.qty : 0;
+    var unit = typeof item.unitPrice === "number" ? item.unitPrice : 0;
+    var lineTotal = qty * unit;
+
+    // calcular extras
+    var extrasTotal = 0;
+
+    if (item.meta && Array.isArray(item.meta.extras)) {
+      for (var i = 0; i < item.meta.extras.length; i++) {
+        var extra = item.meta.extras[i];
+
+        var extraQty = typeof extra.qty === "number" ? extra.qty : 0;
+        var extraUnit = typeof extra.unitPrice === "number" ? extra.unitPrice : 0;
+
+        extrasTotal += extraQty * extraUnit;
+      }
+    }
+
+    var total = lineTotal + extrasTotal;
+
+    if (guestId && totals[guestId] !== undefined) {
+      totals[guestId] += total;
+    }
+  });
+
+  return totals;
+}
+
+function renderSplitModal() {
+  if (!currentOrder) return;
+  var overlay = document.getElementById("split-modal-overlay");
+  if (!overlay) return;
+  var guests = Array.isArray(currentOrder.guests) ? currentOrder.guests : [];
+  var items = Array.isArray(currentOrder.items) ? currentOrder.items : [];
+  var guestList = guests.map(function(g) {
+    return "<li>" + g.name + " (" + g.id + ")</li>";
+  }).join("");
+  var options = guests.map(function(g) {
+    return '<option value="' + g.id + '">' + g.name + "</option>";
+  }).join("");
+  var itemsList = items.map(function(item, index) {
+    var itemLabel = (item.qty || 0) + "x " + (item.name || "Item");
+    return `
+      <div class="cart-item">
+        <span>${itemLabel}</span>
+        <select onchange="assignItemToGuest(${index}, this.value)">
+          <option value="">Sin asignar</option>
+          ${options}
+        </select>
+      </div>
+    `;
+  }).join("");
+  var totals = calculateGuestTotals(currentOrder);
+  var totalsRows = guests.map(function(g) {
+    return "<div>" + g.name + " \u2192 " + formatPrice(totals[g.id] || 0) + "</div>";
+  }).join("");
+
+  overlay.innerHTML = `
+    <div class="history-modal-content">
+      <div class="history-modal-header">
+        <strong>Dividir cuenta</strong>
+        <button type="button" class="ghost" onclick="closeSplitModal()">Cerrar</button>
+      </div>
+      <div class="cart-item">
+        <strong>Personas</strong>
+        <ul>${guestList || "<li>Sin personas</li>"}</ul>
+        <button type="button" class="ghost" onclick="addGuest()">+ agregar persona</button>
+      </div>
+      <div class="cart-item">
+        <strong>Items</strong>
+        ${itemsList || "<p>Sin items</p>"}
+      </div>
+      <div class="cart-item">
+        <strong>Totales por persona</strong>
+        ${totalsRows || "<p>Sin asignaciones</p>"}
+      </div>
+    </div>
+  `;
+  overlay.classList.remove("hidden");
+}
+
+function openSplitModal() {
+  if (!currentOrder) return;
+  var overlay = document.getElementById("split-modal-overlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "split-modal-overlay";
+    overlay.className = "history-modal hidden";
+    document.body.appendChild(overlay);
+  }
+  renderSplitModal();
+}
+
+function closeSplitModal() {
+  var overlay = document.getElementById("split-modal-overlay");
+  if (!overlay) return;
+  overlay.classList.add("hidden");
+}
+
+function addGuest() {
+  if (!currentOrder) return;
+  if (!currentOrder.guests) {
+    currentOrder.guests = [];
+  }
+  var id = "g" + Date.now();
+
+  currentOrder.guests.push({
+    id: id,
+    name: "Persona"
+  });
+
+  renderSplitModal();
+}
+
+function assignItemToGuest(index, guestId) {
+  if (!currentOrder || !Array.isArray(currentOrder.items)) return;
+  if (!currentOrder.items[index]) return;
+  currentOrder.items[index].guestId = guestId;
+  renderSplitModal();
 }
 
 function startAppendOrder(order) {
