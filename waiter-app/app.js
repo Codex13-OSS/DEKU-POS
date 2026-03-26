@@ -1794,10 +1794,12 @@ function renderPaymentPreviewTicket(order) {
     syncCashPaymentState();
   }
 
-  const splitBtn = document.createElement("button");
+  var splitBtn = document.createElement("button");
   splitBtn.className = "ghost";
   splitBtn.textContent = "Asignar cuentas";
-  splitBtn.setAttribute("onclick", "openAssignAccountsModal()");
+  splitBtn.addEventListener("click", function() {
+    openAssignAccountsModal();
+  });
   var primaryMethod = null;
   var remainingMethod = null;
 
@@ -2056,24 +2058,18 @@ function openAssignAccountsModal() {
     splitState.guests = [];
     splitState.assignments = {};
   }
+
   var overlay = document.getElementById("assign-accounts-modal-overlay");
   if (!overlay) {
     overlay = document.createElement("div");
     overlay.id = "assign-accounts-modal-overlay";
-    overlay.className = "history-modal hidden";
     document.body.appendChild(overlay);
   }
-  overlay.classList.remove("hidden");
-  overlay.style.display = "flex";
-  overlay.style.position = "fixed";
-  overlay.style.top = "0";
-  overlay.style.left = "0";
-  overlay.style.width = "100%";
-  overlay.style.height = "100%";
-  overlay.style.background = "rgba(0,0,0,0.6)";
-  overlay.style.zIndex = "9999";
-  overlay.style.alignItems = "center";
-  overlay.style.justifyContent = "center";
+
+  // Forzar estado limpio: remover hidden, aplicar modal
+  overlay.className = "modal";
+  overlay.style.zIndex = "1000";
+
   renderAssignAccountsModal();
 }
 
@@ -2084,7 +2080,7 @@ function closeSplitModal() {
 function closeAssignAccountsModal() {
   var overlay = document.getElementById("assign-accounts-modal-overlay");
   if (!overlay) return;
-  overlay.classList.add("hidden");
+  overlay.className = "modal hidden";
 }
 
 function addGuest() {
@@ -2101,6 +2097,17 @@ function assignItemToGuest(index, guestId) {
   renderAssignAccountsModal();
 }
 
+function assignPartialItem(index, guestId, value) {
+  if (typeof splitState.assignments[index] !== "object"
+      || splitState.assignments[index] === null
+      || typeof splitState.assignments[index] === "string") {
+    splitState.assignments[index] = {};
+  }
+  var val = Math.max(0, Number(value) || 0);
+  splitState.assignments[index][guestId] = val;
+  renderAssignAccountsModal();
+}
+
 function calculateAssignAccountsGuestTotals() {
   var totals = {};
   splitState.guests.forEach(function(guest) {
@@ -2111,17 +2118,50 @@ function calculateAssignAccountsGuestTotals() {
   }
 
   currentOrder.items.forEach(function(item, index) {
-    var guestId = splitState.assignments[index];
-    if (!guestId || totals[guestId] === undefined) return;
-
     var qty = Number(item.qty) || 1;
     var unitPrice = Number(item.unitPrice || item.basePrice || 0);
-    var extras = Array.isArray(item.extras) ? item.extras : [];
+    var extras = (item.meta && Array.isArray(item.meta.extras)) ? item.meta.extras : [];
     var extrasTotal = extras.reduce(function(sum, extra) {
-      return sum + (Number(extra.price || 0) * qty);
+      var extraUnit = typeof extra.unitPrice === "number" ? extra.unitPrice : 0;
+      var extraQty = typeof extra.qty === "number" ? extra.qty : 0;
+      return sum + (extraUnit * extraQty);
     }, 0);
-    totals[guestId] += (unitPrice * qty) + extrasTotal;
+    var assignment = splitState.assignments[index];
+    if (!assignment) return;
+
+    if (typeof assignment === "string") {
+      var guestId = assignment;
+      if (totals[guestId] === undefined) return;
+      totals[guestId] += (unitPrice * qty) + extrasTotal;
+    } else if (typeof assignment === "object") {
+      Object.keys(assignment).forEach(function(gId) {
+        if (totals[gId] === undefined) return;
+        var units = Number(assignment[gId]) || 0;
+        var unitCost = unitPrice + (extrasTotal / qty);
+        totals[gId] += unitCost * units;
+      });
+    }
   });
+
+  // Distribuir descuento 2x1 proporcionalmente entre personas
+  var orderTotals = currentOrder.totals;
+  if (orderTotals && orderTotals.subtotal && orderTotals.total < orderTotals.subtotal) {
+    var subtotal = Number(orderTotals.subtotal);
+    var totalConPromo = Number(orderTotals.total);
+    var sumaPersonas = 0;
+    Object.keys(totals).forEach(function(id) { sumaPersonas += totals[id]; });
+    if (sumaPersonas > 0) {
+      if (Math.abs(subtotal - sumaPersonas) > 1) {
+        console.warn("Assign accounts totals mismatch before promo distribution", {
+          subtotal: subtotal,
+          sumaPersonas: sumaPersonas
+        });
+      }
+      Object.keys(totals).forEach(function(id) {
+        totals[id] = Math.round((totals[id] / sumaPersonas) * totalConPromo);
+      });
+    }
+  }
 
   return totals;
 }
@@ -2130,64 +2170,112 @@ function renderAssignAccountsModal() {
   if (!currentOrder) return;
   var overlay = document.getElementById("assign-accounts-modal-overlay");
   if (!overlay) return;
+
   var items = Array.isArray(currentOrder.items) ? currentOrder.items : [];
   var guests = splitState.guests;
+  var GUEST_COLORS = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7", "#DDA0DD", "#98D8C8", "#F7DC6F"];
 
-  var guestsList = guests.map(function(guest) {
-    return "<li>" + guest.name + "</li>";
+  var guestTagsHtml = guests.length
+    ? guests.map(function(g, gIdx) {
+        var guestColor = g.color || GUEST_COLORS[gIdx % GUEST_COLORS.length];
+        return '<span class="assign-guest-tag" style="background:' + guestColor + '; color:#fff;">' + g.name + '</span>';
+      }).join("")
+    : '<span style="color:#999;font-size:0.85rem">Sin personas agregadas</span>';
+
+  var guestOptions = guests.map(function(g) {
+    return '<option value="' + g.id + '">' + g.name + '</option>';
   }).join("");
 
-  var guestOptions = guests.map(function(guest) {
-    return '<option value="' + guest.id + '">' + guest.name + "</option>";
-  }).join("");
-
-  var itemsHtml = items.map(function(item, index) {
-    var itemLabel = (Number(item.qty) || 1) + "x " + (item.name || "Item");
-    return `
-      <div class="cart-item">
-        <div>${itemLabel}</div>
-        <select onchange="assignItemToGuest(${index}, this.value)">
-          <option value="">Sin asignar</option>
-          ${guestOptions}
-        </select>
-      </div>
-    `;
-  }).join("");
+  var itemsHtml = items.length
+    ? items.map(function(item, idx) {
+        var label = (Number(item.qty) || 1) + "x " + (item.name || "Item");
+        var detail = "";
+        if (item.meta && item.meta.size) {
+          detail += "Tamaño " + item.meta.size;
+          if (item.meta.spiceLevel) detail += " · Picante " + item.meta.spiceLevel;
+          if (item.meta.notes) detail += " · " + item.meta.notes;
+        }
+        var assignment = splitState.assignments[idx];
+        var qty = Number(item.qty) || 1;
+        var isPartial = typeof assignment === "object"
+          && assignment !== null
+          && typeof assignment !== "string";
+        var assignedBadge = "";
+        if (!isPartial && typeof assignment === "string") {
+          var guestAssigned = guests.find(function(g) { return String(g.id) === String(assignment); });
+          if (guestAssigned) {
+            var assignedColor = guestAssigned.color || GUEST_COLORS[guests.indexOf(guestAssigned) % GUEST_COLORS.length];
+            assignedBadge = '<span class="assign-guest-badge" style="background:' + assignedColor + '">' + guestAssigned.name + '</span>';
+          }
+        }
+        if (qty > 1) {
+          var partialRows = guests.map(function(g, gIdx) {
+            var guestColor = g.color || GUEST_COLORS[gIdx % GUEST_COLORS.length];
+            var assignedQty = isPartial ? (Number(assignment[g.id]) || 0) : 0;
+            return '<div class="assign-partial-row">'
+              + '<span class="assign-partial-name"><span class="assign-guest-badge" style="background:' + guestColor + '">' + g.name + '</span></span>'
+              + '<input type="number" min="0" max="' + qty + '" value="' + assignedQty + '" onchange="assignPartialItem(' + idx + ', \'' + g.id + '\', this.value)">'
+              + '</div>';
+          }).join("");
+          return '<div class="assign-item-row">'
+            + '<div><span>' + label + '</span>'
+            + (detail ? '<div class="assign-item-detail">' + detail + '</div>' : '')
+            + '</div>'
+            + '</div>'
+            + '<div>' + partialRows + '</div>';
+        }
+        return '<div class="assign-item-row">'
+          + '<div><span>' + label + '</span>'
+          + assignedBadge
+          + (detail ? '<div class="assign-item-detail">' + detail + '</div>' : '')
+          + '</div>'
+          + '<select onchange="assignItemToGuest(' + idx + ', this.value)">'
+          + '<option value="">Sin asignar</option>'
+          + guestOptions
+          + '</select>'
+          + '</div>';
+      }).join("")
+    : '<p style="color:#999;font-size:0.9rem">Sin items en la orden</p>';
 
   var totals = calculateAssignAccountsGuestTotals();
-  var summaryHtml = guests.map(function(guest) {
-    return "<div>" + guest.name + " → " + formatPrice(totals[guest.id] || 0) + "</div>";
-  }).join("");
+  var summaryHtml = guests.length
+    ? guests.map(function(g) {
+        return '<div class="assign-summary-row">'
+          + '<span>' + g.name + '</span>'
+          + '<strong>' + formatPrice(totals[g.id] || 0) + '</strong>'
+          + '</div>';
+      }).join("")
+    : '<p style="color:#999;font-size:0.9rem">Sin asignaciones</p>';
 
-  overlay.innerHTML = `
-    <div class="history-modal-content">
-      <div class="history-modal-header">
-        <strong>Asignar cuentas</strong>
-        <button type="button" class="ghost" onclick="closeAssignAccountsModal()">Cerrar</button>
-      </div>
-      <div class="cart-item">
-        <strong>Personas</strong>
-        <ul>${guestsList || "<li>Sin personas</li>"}</ul>
-        <button type="button" class="ghost" onclick="addGuest()">+ Agregar persona</button>
-      </div>
-      <div class="cart-item">
-        <strong>Items</strong>
-        ${itemsHtml || "<p>Sin items</p>"}
-      </div>
-      <div class="cart-item">
-        <strong>Total por persona</strong>
-        ${summaryHtml || "<p>Sin asignaciones</p>"}
-      </div>
-    </div>
-  `;
+  overlay.innerHTML = '<div class="modal-content">'
+    + '<header>'
+    + '<strong>Asignar cuentas</strong>'
+    + '<button type="button" class="ghost" onclick="closeAssignAccountsModal()">Cerrar</button>'
+    + '</header>'
+    + '<div class="cart-item">'
+    + '<strong>Personas</strong>'
+    + '<div style="margin-top:8px">' + guestTagsHtml + '</div>'
+    + '<button type="button" class="ghost" style="margin-top:10px;width:100%" onclick="addGuest()">+ Agregar persona</button>'
+    + '</div>'
+    + '<div class="cart-item">'
+    + '<strong>Asignar items</strong>'
+    + '<div style="margin-top:8px">' + itemsHtml + '</div>'
+    + '</div>'
+    + '<div class="cart-item">'
+    + '<strong>Total por persona</strong>'
+    + '<div style="margin-top:8px">' + summaryHtml + '</div>'
+    + '</div>'
+    + '</div>';
 
-  items.forEach(function(_, index) {
-    var select = overlay.querySelector('select[onchange="assignItemToGuest(' + index + ', this.value)"]');
-    if (select) {
-      select.value = splitState.assignments[index] || "";
+  // Restaurar valores de selects después de renderizar
+  items.forEach(function(_, idx) {
+    var sel = overlay.querySelector(
+      'select[onchange="assignItemToGuest(' + idx + ', this.value)"]'
+    );
+    if (sel && typeof splitState.assignments[idx] === "string") {
+      sel.value = splitState.assignments[idx];
     }
   });
-  overlay.classList.remove("hidden");
 }
 
 function startAppendOrder(order) {
