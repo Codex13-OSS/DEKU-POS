@@ -1794,10 +1794,12 @@ function renderPaymentPreviewTicket(order) {
     syncCashPaymentState();
   }
 
-  const splitBtn = document.createElement("button");
+  var splitBtn = document.createElement("button");
   splitBtn.className = "ghost";
   splitBtn.textContent = "Asignar cuentas";
-  splitBtn.setAttribute("onclick", "openAssignAccountsModal()");
+  splitBtn.addEventListener("click", function() {
+    openAssignAccountsModal();
+  });
   var primaryMethod = null;
   var remainingMethod = null;
 
@@ -2065,8 +2067,9 @@ function openAssignAccountsModal() {
     document.body.appendChild(overlay);
   }
 
-  // Usar SOLO clases, nunca inline styles (patrón consistente con historyModal)
+  // Forzar estado limpio: remover hidden, aplicar modal
   overlay.className = "modal";
+  overlay.style.zIndex = "1000";
 
   renderAssignAccountsModal();
 }
@@ -2078,7 +2081,7 @@ function closeSplitModal() {
 function closeAssignAccountsModal() {
   var overlay = document.getElementById("assign-accounts-modal-overlay");
   if (!overlay) return;
-  overlay.classList.add("hidden");
+  overlay.className = "modal hidden";
 }
 
 function addGuest() {
