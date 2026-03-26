@@ -74,6 +74,11 @@ let historyViewMode = "active";
 let historyToggleButton = null;
 let activePanel = null;
 var currentOrder = null;
+var splitState = {
+  guests: [],
+  assignments: {},
+  orderId: null
+};
 
 function updateHistoryToggleButtonLabel() {
   if (!historyToggleButton) return;
@@ -1791,8 +1796,8 @@ function renderPaymentPreviewTicket(order) {
 
   const splitBtn = document.createElement("button");
   splitBtn.className = "ghost";
-  splitBtn.textContent = "Dividir cuenta";
-  splitBtn.setAttribute("onclick", "openSplitModal()");
+  splitBtn.textContent = "Asignar cuentas";
+  splitBtn.setAttribute("onclick", "openAssignAccountsModal()");
   var primaryMethod = null;
   var remainingMethod = null;
 
@@ -2037,96 +2042,141 @@ function calculateGuestTotals(order) {
 }
 
 function renderSplitModal() {
-  if (!currentOrder) return;
-  var overlay = document.getElementById("split-modal-overlay");
-  if (!overlay) return;
-  var guests = Array.isArray(currentOrder.guests) ? currentOrder.guests : [];
-  var items = Array.isArray(currentOrder.items) ? currentOrder.items : [];
-  var guestList = guests.map(function(g) {
-    return "<li>" + g.name + " (" + g.id + ")</li>";
-  }).join("");
-  var options = guests.map(function(g) {
-    return '<option value="' + g.id + '">' + g.name + "</option>";
-  }).join("");
-  var itemsList = items.map(function(item, index) {
-    var itemLabel = (item.qty || 0) + "x " + (item.name || "Item");
-    return `
-      <div class="cart-item">
-        <span>${itemLabel}</span>
-        <select onchange="assignItemToGuest(${index}, this.value)">
-          <option value="">Sin asignar</option>
-          ${options}
-        </select>
-      </div>
-    `;
-  }).join("");
-  var totals = calculateGuestTotals(currentOrder);
-  var totalsRows = guests.map(function(g) {
-    return "<div>" + g.name + " \u2192 " + formatPrice(totals[g.id] || 0) + "</div>";
-  }).join("");
-
-  overlay.innerHTML = `
-    <div class="history-modal-content">
-      <div class="history-modal-header">
-        <strong>Dividir cuenta</strong>
-        <button type="button" class="ghost" onclick="closeSplitModal()">Cerrar</button>
-      </div>
-      <div class="cart-item">
-        <strong>Personas</strong>
-        <ul>${guestList || "<li>Sin personas</li>"}</ul>
-        <button type="button" class="ghost" onclick="addGuest()">+ agregar persona</button>
-      </div>
-      <div class="cart-item">
-        <strong>Items</strong>
-        ${itemsList || "<p>Sin items</p>"}
-      </div>
-      <div class="cart-item">
-        <strong>Totales por persona</strong>
-        ${totalsRows || "<p>Sin asignaciones</p>"}
-      </div>
-    </div>
-  `;
-  overlay.classList.remove("hidden");
+  renderAssignAccountsModal();
 }
 
 function openSplitModal() {
+  openAssignAccountsModal();
+}
+
+function openAssignAccountsModal() {
   if (!currentOrder) return;
-  var overlay = document.getElementById("split-modal-overlay");
+  if (splitState.orderId !== currentOrder.id) {
+    splitState.orderId = currentOrder.id;
+    splitState.guests = [];
+    splitState.assignments = {};
+  }
+  var overlay = document.getElementById("assign-accounts-modal-overlay");
   if (!overlay) {
     overlay = document.createElement("div");
-    overlay.id = "split-modal-overlay";
+    overlay.id = "assign-accounts-modal-overlay";
     overlay.className = "history-modal hidden";
     document.body.appendChild(overlay);
   }
-  renderSplitModal();
+  renderAssignAccountsModal();
 }
 
 function closeSplitModal() {
-  var overlay = document.getElementById("split-modal-overlay");
+  closeAssignAccountsModal();
+}
+
+function closeAssignAccountsModal() {
+  var overlay = document.getElementById("assign-accounts-modal-overlay");
   if (!overlay) return;
   overlay.classList.add("hidden");
 }
 
 function addGuest() {
-  if (!currentOrder) return;
-  if (!currentOrder.guests) {
-    currentOrder.guests = [];
-  }
-  var id = "g" + Date.now();
-
-  currentOrder.guests.push({
-    id: id,
-    name: "Persona"
+  var nextNumber = splitState.guests.length + 1;
+  splitState.guests.push({
+    id: Date.now(),
+    name: "Persona " + nextNumber
   });
-
-  renderSplitModal();
+  renderAssignAccountsModal();
 }
 
 function assignItemToGuest(index, guestId) {
-  if (!currentOrder || !Array.isArray(currentOrder.items)) return;
-  if (!currentOrder.items[index]) return;
-  currentOrder.items[index].guestId = guestId;
-  renderSplitModal();
+  splitState.assignments[index] = guestId;
+  renderAssignAccountsModal();
+}
+
+function calculateAssignAccountsGuestTotals() {
+  var totals = {};
+  splitState.guests.forEach(function(guest) {
+    totals[guest.id] = 0;
+  });
+  if (!currentOrder || !Array.isArray(currentOrder.items)) {
+    return totals;
+  }
+
+  currentOrder.items.forEach(function(item, index) {
+    var guestId = splitState.assignments[index];
+    if (!guestId || totals[guestId] === undefined) return;
+
+    var qty = Number(item.qty) || 1;
+    var unitPrice = Number(item.unitPrice || item.basePrice || 0);
+    var extras = Array.isArray(item.extras) ? item.extras : [];
+    var extrasTotal = extras.reduce(function(sum, extra) {
+      return sum + (Number(extra.price || 0) * qty);
+    }, 0);
+    totals[guestId] += (unitPrice * qty) + extrasTotal;
+  });
+
+  return totals;
+}
+
+function renderAssignAccountsModal() {
+  if (!currentOrder) return;
+  var overlay = document.getElementById("assign-accounts-modal-overlay");
+  if (!overlay) return;
+  var items = Array.isArray(currentOrder.items) ? currentOrder.items : [];
+  var guests = splitState.guests;
+
+  var guestsList = guests.map(function(guest) {
+    return "<li>" + guest.name + "</li>";
+  }).join("");
+
+  var guestOptions = guests.map(function(guest) {
+    return '<option value="' + guest.id + '">' + guest.name + "</option>";
+  }).join("");
+
+  var itemsHtml = items.map(function(item, index) {
+    var itemLabel = (Number(item.qty) || 1) + "x " + (item.name || "Item");
+    return `
+      <div class="cart-item">
+        <div>${itemLabel}</div>
+        <select onchange="assignItemToGuest(${index}, this.value)">
+          <option value="">Sin asignar</option>
+          ${guestOptions}
+        </select>
+      </div>
+    `;
+  }).join("");
+
+  var totals = calculateAssignAccountsGuestTotals();
+  var summaryHtml = guests.map(function(guest) {
+    return "<div>" + guest.name + " → " + formatPrice(totals[guest.id] || 0) + "</div>";
+  }).join("");
+
+  overlay.innerHTML = `
+    <div class="history-modal-content">
+      <div class="history-modal-header">
+        <strong>Asignar cuentas</strong>
+        <button type="button" class="ghost" onclick="closeAssignAccountsModal()">Cerrar</button>
+      </div>
+      <div class="cart-item">
+        <strong>Personas</strong>
+        <ul>${guestsList || "<li>Sin personas</li>"}</ul>
+        <button type="button" class="ghost" onclick="addGuest()">+ Agregar persona</button>
+      </div>
+      <div class="cart-item">
+        <strong>Items</strong>
+        ${itemsHtml || "<p>Sin items</p>"}
+      </div>
+      <div class="cart-item">
+        <strong>Total por persona</strong>
+        ${summaryHtml || "<p>Sin asignaciones</p>"}
+      </div>
+    </div>
+  `;
+
+  items.forEach(function(_, index) {
+    var select = overlay.querySelector('select[onchange="assignItemToGuest(' + index + ', this.value)"]');
+    if (select) {
+      select.value = splitState.assignments[index] || "";
+    }
+  });
+  overlay.classList.remove("hidden");
 }
 
 function startAppendOrder(order) {
