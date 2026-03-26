@@ -2060,6 +2060,7 @@ function openAssignAccountsModal() {
   }
 
   var overlay = document.getElementById("assign-accounts-modal-overlay");
+
   if (!overlay) {
     overlay = document.createElement("div");
     overlay.id = "assign-accounts-modal-overlay";
