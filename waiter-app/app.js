@@ -2057,23 +2057,26 @@ function openAssignAccountsModal() {
     splitState.assignments = {};
   }
   var overlay = document.getElementById("assign-accounts-modal-overlay");
+
   if (!overlay) {
     overlay = document.createElement("div");
     overlay.id = "assign-accounts-modal-overlay";
-    overlay.className = "history-modal hidden";
     document.body.appendChild(overlay);
   }
-  overlay.classList.remove("hidden");
-  overlay.style.display = "flex";
+
+  overlay.className = "";
+
   overlay.style.position = "fixed";
   overlay.style.top = "0";
   overlay.style.left = "0";
   overlay.style.width = "100%";
   overlay.style.height = "100%";
   overlay.style.background = "rgba(0,0,0,0.6)";
-  overlay.style.zIndex = "9999";
+  overlay.style.display = "flex";
   overlay.style.alignItems = "center";
   overlay.style.justifyContent = "center";
+  overlay.style.zIndex = "9999";
+
   renderAssignAccountsModal();
 }
 
