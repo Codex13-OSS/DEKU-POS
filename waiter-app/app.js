@@ -2056,24 +2056,17 @@ function openAssignAccountsModal() {
     splitState.guests = [];
     splitState.assignments = {};
   }
+
   var overlay = document.getElementById("assign-accounts-modal-overlay");
   if (!overlay) {
     overlay = document.createElement("div");
     overlay.id = "assign-accounts-modal-overlay";
-    overlay.className = "history-modal hidden";
     document.body.appendChild(overlay);
   }
-  overlay.classList.remove("hidden");
-  overlay.style.display = "flex";
-  overlay.style.position = "fixed";
-  overlay.style.top = "0";
-  overlay.style.left = "0";
-  overlay.style.width = "100%";
-  overlay.style.height = "100%";
-  overlay.style.background = "rgba(0,0,0,0.6)";
-  overlay.style.zIndex = "9999";
-  overlay.style.alignItems = "center";
-  overlay.style.justifyContent = "center";
+
+  // Usar SOLO clases, nunca inline styles (patrón consistente con historyModal)
+  overlay.className = "modal";
+
   renderAssignAccountsModal();
 }
 
@@ -2130,64 +2123,73 @@ function renderAssignAccountsModal() {
   if (!currentOrder) return;
   var overlay = document.getElementById("assign-accounts-modal-overlay");
   if (!overlay) return;
+
   var items = Array.isArray(currentOrder.items) ? currentOrder.items : [];
   var guests = splitState.guests;
 
-  var guestsList = guests.map(function(guest) {
-    return "<li>" + guest.name + "</li>";
+  var guestTagsHtml = guests.length
+    ? guests.map(function(g) {
+        return '<span class="assign-guest-tag">' + g.name + '</span>';
+      }).join("")
+    : '<span style="color:#999;font-size:0.85rem">Sin personas agregadas</span>';
+
+  var guestOptions = guests.map(function(g) {
+    return '<option value="' + g.id + '">' + g.name + '</option>';
   }).join("");
 
-  var guestOptions = guests.map(function(guest) {
-    return '<option value="' + guest.id + '">' + guest.name + "</option>";
-  }).join("");
-
-  var itemsHtml = items.map(function(item, index) {
-    var itemLabel = (Number(item.qty) || 1) + "x " + (item.name || "Item");
-    return `
-      <div class="cart-item">
-        <div>${itemLabel}</div>
-        <select onchange="assignItemToGuest(${index}, this.value)">
-          <option value="">Sin asignar</option>
-          ${guestOptions}
-        </select>
-      </div>
-    `;
-  }).join("");
+  var itemsHtml = items.length
+    ? items.map(function(item, idx) {
+        var label = (Number(item.qty) || 1) + "x " + (item.name || "Item");
+        var assigned = splitState.assignments[idx] || "";
+        return '<div class="assign-item-row">'
+          + '<span>' + label + '</span>'
+          + '<select onchange="assignItemToGuest(' + idx + ', this.value)">'
+          + '<option value="">Sin asignar</option>'
+          + guestOptions
+          + '</select>'
+          + '</div>';
+      }).join("")
+    : '<p style="color:#999;font-size:0.9rem">Sin items en la orden</p>';
 
   var totals = calculateAssignAccountsGuestTotals();
-  var summaryHtml = guests.map(function(guest) {
-    return "<div>" + guest.name + " → " + formatPrice(totals[guest.id] || 0) + "</div>";
-  }).join("");
+  var summaryHtml = guests.length
+    ? guests.map(function(g) {
+        return '<div class="assign-summary-row">'
+          + '<span>' + g.name + '</span>'
+          + '<strong>' + formatPrice(totals[g.id] || 0) + '</strong>'
+          + '</div>';
+      }).join("")
+    : '<p style="color:#999;font-size:0.9rem">Sin asignaciones</p>';
 
-  overlay.innerHTML = `
-    <div class="history-modal-content">
-      <div class="history-modal-header">
-        <strong>Asignar cuentas</strong>
-        <button type="button" class="ghost" onclick="closeAssignAccountsModal()">Cerrar</button>
-      </div>
-      <div class="cart-item">
-        <strong>Personas</strong>
-        <ul>${guestsList || "<li>Sin personas</li>"}</ul>
-        <button type="button" class="ghost" onclick="addGuest()">+ Agregar persona</button>
-      </div>
-      <div class="cart-item">
-        <strong>Items</strong>
-        ${itemsHtml || "<p>Sin items</p>"}
-      </div>
-      <div class="cart-item">
-        <strong>Total por persona</strong>
-        ${summaryHtml || "<p>Sin asignaciones</p>"}
-      </div>
-    </div>
-  `;
+  overlay.innerHTML = '<div class="modal-content">'
+    + '<header>'
+    + '<strong>Asignar cuentas</strong>'
+    + '<button type="button" class="ghost" onclick="closeAssignAccountsModal()">Cerrar</button>'
+    + '</header>'
+    + '<div class="cart-item">'
+    + '<strong>Personas</strong>'
+    + '<div style="margin-top:8px">' + guestTagsHtml + '</div>'
+    + '<button type="button" class="ghost" style="margin-top:10px;width:100%" onclick="addGuest()">+ Agregar persona</button>'
+    + '</div>'
+    + '<div class="cart-item">'
+    + '<strong>Asignar items</strong>'
+    + '<div style="margin-top:8px">' + itemsHtml + '</div>'
+    + '</div>'
+    + '<div class="cart-item">'
+    + '<strong>Total por persona</strong>'
+    + '<div style="margin-top:8px">' + summaryHtml + '</div>'
+    + '</div>'
+    + '</div>';
 
-  items.forEach(function(_, index) {
-    var select = overlay.querySelector('select[onchange="assignItemToGuest(' + index + ', this.value)"]');
-    if (select) {
-      select.value = splitState.assignments[index] || "";
+  // Restaurar valores de selects después de renderizar
+  items.forEach(function(_, idx) {
+    var sel = overlay.querySelector(
+      'select[onchange="assignItemToGuest(' + idx + ', this.value)"]'
+    );
+    if (sel && splitState.assignments[idx]) {
+      sel.value = splitState.assignments[idx];
     }
   });
-  overlay.classList.remove("hidden");
 }
 
 function startAppendOrder(order) {
