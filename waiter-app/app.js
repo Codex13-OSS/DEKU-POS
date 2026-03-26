@@ -2173,6 +2173,34 @@ function renderAssignAccountsModal() {
   if (!overlay) return;
 
   var items = Array.isArray(currentOrder.items) ? currentOrder.items : [];
+  var parentItems = [];
+  var childrenMap = {};
+  items.forEach(function(item, idx) {
+    if (item && item.parentItemId) {
+      if (!childrenMap[item.parentItemId]) childrenMap[item.parentItemId] = [];
+      childrenMap[item.parentItemId].push({ item: item, index: idx });
+    } else {
+      parentItems.push({ item: item, index: idx });
+    }
+  });
+
+  parentItems.forEach(function(parentEntry) {
+    var parent = parentEntry.item;
+    var parentIdx = parentEntry.index;
+    var childEntries = childrenMap[parent && parent.id] || [];
+    if (!childEntries.length) return;
+    var parentAssignment = splitState.assignments[parentIdx];
+    childEntries.forEach(function(childEntry) {
+      if (typeof parentAssignment === "string") {
+        splitState.assignments[childEntry.index] = parentAssignment;
+      } else if (typeof parentAssignment === "object" && parentAssignment !== null) {
+        splitState.assignments[childEntry.index] = Object.assign({}, parentAssignment);
+      } else {
+        delete splitState.assignments[childEntry.index];
+      }
+    });
+  });
+
   var guests = splitState.guests;
   var GUEST_COLORS = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7", "#DDA0DD", "#98D8C8", "#F7DC6F"];
 
@@ -2187,20 +2215,31 @@ function renderAssignAccountsModal() {
     return '<option value="' + g.id + '">' + g.name + '</option>';
   }).join("");
 
-  var itemsHtml = items.length
-    ? items.map(function(item, idx) {
+  var itemsHtml = parentItems.length
+    ? parentItems.map(function(entry) {
+        var item = entry.item;
+        var idx = entry.index;
         var label = (Number(item.qty) || 1) + "x " + (item.name || "Item");
-        var detail = "";
-        if (item.meta && item.meta.size) {
-          detail += "Tamaño " + item.meta.size;
-          if (item.meta.spiceLevel) detail += " · Picante " + item.meta.spiceLevel;
-          if (item.meta.notes) detail += " · " + item.meta.notes;
+        var detailParts = [];
+        if (item.meta) {
+          if (item.meta.size) detailParts.push("Tamaño " + item.meta.size);
+          if (item.meta.spiceLevel != null) detailParts.push("Picante " + item.meta.spiceLevel);
+          if (item.meta.notes && item.meta.notes.trim()) detailParts.push("<strong>" + item.meta.notes.trim() + "</strong>");
         }
+        var detail = detailParts.join(" · ");
         var assignment = splitState.assignments[idx];
         var qty = Number(item.qty) || 1;
         var isPartial = typeof assignment === "object"
           && assignment !== null
           && typeof assignment !== "string";
+        var childEntries = childrenMap[item.id] || [];
+        var extrasHtml = childEntries.length
+          ? '<div class="assign-extras-list">' + childEntries.map(function(childEntry) {
+              var childItem = childEntry.item || {};
+              var childQty = Number(childItem.qty) || 1;
+              return '<span class="assign-extra-item">↳ ' + (childItem.name || "Extra") + ' x' + childQty + '</span>';
+            }).join("") + '</div>'
+          : '';
         var assignedBadge = "";
         if (!isPartial && typeof assignment === "string") {
           var guestAssigned = guests.find(function(g) { return String(g.id) === String(assignment); });
@@ -2213,22 +2252,36 @@ function renderAssignAccountsModal() {
           var partialRows = guests.map(function(g, gIdx) {
             var guestColor = g.color || GUEST_COLORS[gIdx % GUEST_COLORS.length];
             var assignedQty = isPartial ? (Number(assignment[g.id]) || 0) : 0;
+            if (assignedQty <= 0) return "";
             return '<div class="assign-partial-row">'
               + '<span class="assign-partial-name"><span class="assign-guest-badge" style="background:' + guestColor + '">' + g.name + '</span></span>'
               + '<input type="number" min="0" max="' + qty + '" value="' + assignedQty + '" onchange="assignPartialItem(' + idx + ', \'' + g.id + '\', this.value)">'
               + '</div>';
           }).join("");
+          var unassignedGuests = guests.filter(function(g) {
+            var assignedQty = isPartial ? (Number(assignment[g.id]) || 0) : 0;
+            return assignedQty <= 0;
+          });
+          var addOptions = unassignedGuests.map(function(g) {
+            return '<option value="' + g.id + '">' + g.name + '</option>';
+          }).join("");
+          var addControl = '<div class="assign-partial-add"><select onchange="if(this.value){assignPartialItem(' + idx + ', this.value, 1);} this.value=\'\'">'
+            + '<option value="">+ Agregar persona</option>'
+            + addOptions
+            + '</select></div>';
           return '<div class="assign-item-row">'
             + '<div><span>' + label + '</span>'
-            + (detail ? '<div class="assign-item-detail">' + detail + '</div>' : '')
+            + '<div class="assign-item-detail">' + (detail || "") + '</div>'
+            + extrasHtml
             + '</div>'
             + '</div>'
-            + '<div>' + partialRows + '</div>';
+            + '<div>' + partialRows + addControl + '</div>';
         }
         return '<div class="assign-item-row">'
           + '<div><span>' + label + '</span>'
           + assignedBadge
-          + (detail ? '<div class="assign-item-detail">' + detail + '</div>' : '')
+          + '<div class="assign-item-detail">' + (detail || "") + '</div>'
+          + extrasHtml
           + '</div>'
           + '<select onchange="assignItemToGuest(' + idx + ', this.value)">'
           + '<option value="">Sin asignar</option>'
@@ -2269,7 +2322,8 @@ function renderAssignAccountsModal() {
     + '</div>';
 
   // Restaurar valores de selects después de renderizar
-  items.forEach(function(_, idx) {
+  parentItems.forEach(function(entry) {
+    var idx = entry.index;
     var sel = overlay.querySelector(
       'select[onchange="assignItemToGuest(' + idx + ', this.value)"]'
     );
