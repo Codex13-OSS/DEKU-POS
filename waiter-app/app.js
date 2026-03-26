@@ -1791,8 +1791,9 @@ function renderPaymentPreviewTicket(order) {
 
   const splitBtn = document.createElement("button");
   splitBtn.className = "ghost";
-  splitBtn.textContent = "Dividir cuenta";
-  splitBtn.setAttribute("onclick", "openSplitModal()");
+  splitBtn.disabled = true;
+  splitBtn.style.cssText = "opacity:0.5; cursor:not-allowed;";
+  splitBtn.textContent = "Dividir cuenta (próximamente)";
   var primaryMethod = null;
   var remainingMethod = null;
 
