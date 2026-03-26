@@ -2098,6 +2098,17 @@ function assignItemToGuest(index, guestId) {
   renderAssignAccountsModal();
 }
 
+function assignPartialItem(index, guestId, value) {
+  if (typeof splitState.assignments[index] !== "object"
+      || splitState.assignments[index] === null
+      || typeof splitState.assignments[index] === "string") {
+    splitState.assignments[index] = {};
+  }
+  var val = Math.max(0, Number(value) || 0);
+  splitState.assignments[index][guestId] = val;
+  renderAssignAccountsModal();
+}
+
 function calculateAssignAccountsGuestTotals() {
   var totals = {};
   splitState.guests.forEach(function(guest) {
@@ -2108,9 +2119,6 @@ function calculateAssignAccountsGuestTotals() {
   }
 
   currentOrder.items.forEach(function(item, index) {
-    var guestId = splitState.assignments[index];
-    if (!guestId || totals[guestId] === undefined) return;
-
     var qty = Number(item.qty) || 1;
     var unitPrice = Number(item.unitPrice || item.basePrice || 0);
     var extras = (item.meta && Array.isArray(item.meta.extras)) ? item.meta.extras : [];
@@ -2119,7 +2127,21 @@ function calculateAssignAccountsGuestTotals() {
       var extraQty = typeof extra.qty === "number" ? extra.qty : 0;
       return sum + (extraUnit * extraQty);
     }, 0);
-    totals[guestId] += (unitPrice * qty) + extrasTotal;
+    var assignment = splitState.assignments[index];
+    if (!assignment) return;
+
+    if (typeof assignment === "string") {
+      var guestId = assignment;
+      if (totals[guestId] === undefined) return;
+      totals[guestId] += (unitPrice * qty) + extrasTotal;
+    } else if (typeof assignment === "object") {
+      Object.keys(assignment).forEach(function(gId) {
+        if (totals[gId] === undefined) return;
+        var units = Number(assignment[gId]) || 0;
+        var unitCost = unitPrice + (extrasTotal / qty);
+        totals[gId] += unitCost * units;
+      });
+    }
   });
 
   // Distribuir descuento 2x1 proporcionalmente entre personas
@@ -2152,10 +2174,12 @@ function renderAssignAccountsModal() {
 
   var items = Array.isArray(currentOrder.items) ? currentOrder.items : [];
   var guests = splitState.guests;
+  var GUEST_COLORS = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7", "#DDA0DD", "#98D8C8", "#F7DC6F"];
 
   var guestTagsHtml = guests.length
-    ? guests.map(function(g) {
-        return '<span class="assign-guest-tag">' + g.name + '</span>';
+    ? guests.map(function(g, gIdx) {
+        var guestColor = g.color || GUEST_COLORS[gIdx % GUEST_COLORS.length];
+        return '<span class="assign-guest-tag" style="background:' + guestColor + '; color:#fff;">' + g.name + '</span>';
       }).join("")
     : '<span style="color:#999;font-size:0.85rem">Sin personas agregadas</span>';
 
@@ -2166,9 +2190,46 @@ function renderAssignAccountsModal() {
   var itemsHtml = items.length
     ? items.map(function(item, idx) {
         var label = (Number(item.qty) || 1) + "x " + (item.name || "Item");
-        var assigned = splitState.assignments[idx] || "";
+        var detail = "";
+        if (item.meta && item.meta.size) {
+          detail += "Tamaño " + item.meta.size;
+          if (item.meta.spiceLevel) detail += " · Picante " + item.meta.spiceLevel;
+          if (item.meta.notes) detail += " · " + item.meta.notes;
+        }
+        var assignment = splitState.assignments[idx];
+        var qty = Number(item.qty) || 1;
+        var isPartial = typeof assignment === "object"
+          && assignment !== null
+          && typeof assignment !== "string";
+        var assignedBadge = "";
+        if (!isPartial && typeof assignment === "string") {
+          var guestAssigned = guests.find(function(g) { return String(g.id) === String(assignment); });
+          if (guestAssigned) {
+            var assignedColor = guestAssigned.color || GUEST_COLORS[guests.indexOf(guestAssigned) % GUEST_COLORS.length];
+            assignedBadge = '<span class="assign-guest-badge" style="background:' + assignedColor + '">' + guestAssigned.name + '</span>';
+          }
+        }
+        if (qty > 1) {
+          var partialRows = guests.map(function(g, gIdx) {
+            var guestColor = g.color || GUEST_COLORS[gIdx % GUEST_COLORS.length];
+            var assignedQty = isPartial ? (Number(assignment[g.id]) || 0) : 0;
+            return '<div class="assign-partial-row">'
+              + '<span class="assign-partial-name"><span class="assign-guest-badge" style="background:' + guestColor + '">' + g.name + '</span></span>'
+              + '<input type="number" min="0" max="' + qty + '" value="' + assignedQty + '" onchange="assignPartialItem(' + idx + ', \'' + g.id + '\', this.value)">'
+              + '</div>';
+          }).join("");
+          return '<div class="assign-item-row">'
+            + '<div><span>' + label + '</span>'
+            + (detail ? '<div class="assign-item-detail">' + detail + '</div>' : '')
+            + '</div>'
+            + '</div>'
+            + '<div>' + partialRows + '</div>';
+        }
         return '<div class="assign-item-row">'
-          + '<span>' + label + '</span>'
+          + '<div><span>' + label + '</span>'
+          + assignedBadge
+          + (detail ? '<div class="assign-item-detail">' + detail + '</div>' : '')
+          + '</div>'
           + '<select onchange="assignItemToGuest(' + idx + ', this.value)">'
           + '<option value="">Sin asignar</option>'
           + guestOptions
@@ -2212,7 +2273,7 @@ function renderAssignAccountsModal() {
     var sel = overlay.querySelector(
       'select[onchange="assignItemToGuest(' + idx + ', this.value)"]'
     );
-    if (sel && splitState.assignments[idx]) {
+    if (sel && typeof splitState.assignments[idx] === "string") {
       sel.value = splitState.assignments[idx];
     }
   });
