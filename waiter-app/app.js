@@ -2063,6 +2063,17 @@ function openAssignAccountsModal() {
     overlay.className = "history-modal hidden";
     document.body.appendChild(overlay);
   }
+  overlay.classList.remove("hidden");
+  overlay.style.display = "flex";
+  overlay.style.position = "fixed";
+  overlay.style.top = "0";
+  overlay.style.left = "0";
+  overlay.style.width = "100%";
+  overlay.style.height = "100%";
+  overlay.style.background = "rgba(0,0,0,0.6)";
+  overlay.style.zIndex = "9999";
+  overlay.style.alignItems = "center";
+  overlay.style.justifyContent = "center";
   renderAssignAccountsModal();
 }
 
