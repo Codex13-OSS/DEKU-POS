@@ -655,6 +655,32 @@ body {
   margin-left: 6px;
 }
 
+.assign-extras-list {
+  margin-top: 4px;
+  padding-left: 12px;
+}
+
+.assign-extra-item {
+  display: block;
+  font-size: 11px;
+  color: #999;
+  line-height: 1.6;
+}
+
+.assign-item-detail strong {
+  font-weight: 700;
+  color: #555;
+}
+
+.assign-partial-add select {
+  border: none;
+  background: none;
+  color: #888;
+  font-size: 12px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
 @media (max-width: 1024px) {
   .layout {
     grid-template-columns: 1fr;
