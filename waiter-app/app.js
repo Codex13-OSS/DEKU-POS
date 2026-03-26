@@ -2113,12 +2113,34 @@ function calculateAssignAccountsGuestTotals() {
 
     var qty = Number(item.qty) || 1;
     var unitPrice = Number(item.unitPrice || item.basePrice || 0);
-    var extras = Array.isArray(item.extras) ? item.extras : [];
+    var extras = (item.meta && Array.isArray(item.meta.extras)) ? item.meta.extras : [];
     var extrasTotal = extras.reduce(function(sum, extra) {
-      return sum + (Number(extra.price || 0) * qty);
+      var extraUnit = typeof extra.unitPrice === "number" ? extra.unitPrice : 0;
+      var extraQty = typeof extra.qty === "number" ? extra.qty : 0;
+      return sum + (extraUnit * extraQty);
     }, 0);
     totals[guestId] += (unitPrice * qty) + extrasTotal;
   });
+
+  // Distribuir descuento 2x1 proporcionalmente entre personas
+  var orderTotals = currentOrder.totals;
+  if (orderTotals && orderTotals.subtotal && orderTotals.total < orderTotals.subtotal) {
+    var subtotal = Number(orderTotals.subtotal);
+    var totalConPromo = Number(orderTotals.total);
+    var sumaPersonas = 0;
+    Object.keys(totals).forEach(function(id) { sumaPersonas += totals[id]; });
+    if (sumaPersonas > 0) {
+      if (Math.abs(subtotal - sumaPersonas) > 1) {
+        console.warn("Assign accounts totals mismatch before promo distribution", {
+          subtotal: subtotal,
+          sumaPersonas: sumaPersonas
+        });
+      }
+      Object.keys(totals).forEach(function(id) {
+        totals[id] = Math.round((totals[id] / sumaPersonas) * totalConPromo);
+      });
+    }
+  }
 
   return totals;
 }
