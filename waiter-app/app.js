@@ -869,27 +869,92 @@ function renderPromoStatus() {
 }
 
 function openPromoSelector() {
-  const choice = window.prompt(
-    "Selecciona una promo:\n1) 2x1 jueves\n2) Combo viernes 169\n(Deja vacío o cancela para quitar promo)",
-    ""
-  );
-
-  if (choice === null || choice.trim() === "") {
-    selectedPromoId = null;
-    renderPromoStatus();
-    return;
+  const existingModal = document.querySelector(".promo-modal");
+  if (existingModal) {
+    existingModal.remove();
   }
 
-  if (choice.trim() === "1") {
-    selectedPromoId = "2x1_jueves";
-  } else if (choice.trim() === "2") {
-    selectedPromoId = "combo_viernes_169";
-  } else {
-    alert("Opción inválida.");
-    return;
-  }
+  const modal = document.createElement("div");
+  modal.className = "promo-modal";
+  modal.style.position = "fixed";
+  modal.style.inset = "0";
+  modal.style.background = "rgba(0, 0, 0, 0.6)";
+  modal.style.display = "flex";
+  modal.style.alignItems = "center";
+  modal.style.justifyContent = "center";
+  modal.style.zIndex = "9999";
 
-  renderPromoStatus();
+  const box = document.createElement("div");
+  box.className = "promo-box";
+  box.style.background = "#111";
+  box.style.color = "#fff";
+  box.style.padding = "16px";
+  box.style.borderRadius = "14px";
+  box.style.width = "min(92vw, 360px)";
+  box.style.display = "grid";
+  box.style.gap = "10px";
+
+  const title = document.createElement("h3");
+  title.textContent = "Selecciona una promoción";
+  title.style.margin = "0 0 8px 0";
+
+  const btn2x1 = document.createElement("button");
+  btn2x1.type = "button";
+  btn2x1.dataset.promo = "2x1_jueves";
+  btn2x1.textContent = "2x1 Jueves";
+
+  const btnCombo = document.createElement("button");
+  btnCombo.type = "button";
+  btnCombo.dataset.promo = "combo_viernes_169";
+  btnCombo.textContent = "Combo Viernes $169";
+
+  const btnClear = document.createElement("button");
+  btnClear.type = "button";
+  btnClear.dataset.clear = "true";
+  btnClear.textContent = "Quitar promo";
+
+  [btn2x1, btnCombo, btnClear].forEach((btn) => {
+    btn.style.minHeight = "52px";
+    btn.style.fontSize = "16px";
+    btn.style.borderRadius = "10px";
+    btn.style.border = "1px solid #555";
+    btn.style.background = "#1f1f1f";
+    btn.style.color = "#fff";
+  });
+
+  box.append(title, btn2x1, btnCombo, btnClear);
+  modal.appendChild(box);
+
+  const closeModal = () => {
+    modal.remove();
+  };
+
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) {
+      closeModal();
+    }
+  });
+
+  box.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    if (target.dataset && target.dataset.promo) {
+      selectedPromoId = target.dataset.promo;
+    }
+
+    if (target.dataset && target.dataset.clear === "true") {
+      selectedPromoId = null;
+    }
+
+    if ((target.dataset && target.dataset.promo) || (target.dataset && target.dataset.clear === "true")) {
+      closeModal();
+      renderPromoStatus();
+      renderCart();
+    }
+  });
+
+  document.body.appendChild(modal);
 }
 
 async function fetchPromoStatus() {
