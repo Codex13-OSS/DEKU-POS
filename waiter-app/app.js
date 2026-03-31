@@ -79,6 +79,7 @@ var splitState = {
   assignments: {},
   orderId: null
 };
+let selectedPromoId = null;
 
 function updateHistoryToggleButtonLabel() {
   if (!historyToggleButton) return;
@@ -724,6 +725,13 @@ function renderCart() {
   const totals = calculateTotals();
   subtotalEl.textContent = formatPrice(totals.subtotal);
   totalEl.textContent = formatPrice(totals.total);
+  if (promoStatus) {
+    if (totals.promoApplied && selectedPromoId === "combo_viernes_169") {
+      promoStatus.textContent = "Promo aplicada: Combo viernes 169";
+    } else {
+      renderPromoStatus();
+    }
+  }
 }
 
 function resetLocalTicketState() {
@@ -838,31 +846,50 @@ function renderNoteSection() {
   cartItems.appendChild(wrapper);
 }
 
+function getSelectedPromoLabel() {
+  if (selectedPromoId === "2x1_jueves") return "2x1 jueves";
+  if (selectedPromoId === "combo_viernes_169") return "Combo viernes 169";
+  return "Sin promo";
+}
+
 function renderPromoStatus() {
   if (!promoStatus) return;
   if (promoToggle) {
     promoToggle.classList.add("promo-toggle");
+    promoToggle.textContent = "PROMOS";
+    promoToggle.classList.toggle("promo-toggle-active", Boolean(selectedPromoId));
   }
-  if (!state.promo) {
-    promoStatus.textContent = "PROMO 2x1: INACTIVA";
-    if (promoToggle) {
-      promoToggle.textContent = "2x1";
-      promoToggle.classList.remove("promo-toggle-active");
-    }
+
+  if (selectedPromoId) {
+    promoStatus.textContent = `Promo activa: ${getSelectedPromoLabel()}`;
     return;
   }
-  if (state.promo.promoActive) {
-    const label = state.promo.promoSource === "auto_thursday"
-      ? "PROMO 2x1: ACTIVA (AUTO JUEVES)"
-      : "PROMO 2x1: ACTIVA (OVERRIDE)";
-    promoStatus.textContent = label;
+
+  promoStatus.textContent = "Promo activa: Sin promo";
+}
+
+function openPromoSelector() {
+  const choice = window.prompt(
+    "Selecciona una promo:\n1) 2x1 jueves\n2) Combo viernes 169\n(Deja vacío o cancela para quitar promo)",
+    ""
+  );
+
+  if (choice === null || choice.trim() === "") {
+    selectedPromoId = null;
+    renderPromoStatus();
+    return;
+  }
+
+  if (choice.trim() === "1") {
+    selectedPromoId = "2x1_jueves";
+  } else if (choice.trim() === "2") {
+    selectedPromoId = "combo_viernes_169";
   } else {
-    promoStatus.textContent = "PROMO 2x1: INACTIVA";
+    alert("Opción inválida.");
+    return;
   }
-  if (promoToggle) {
-    promoToggle.textContent = "2x1";
-    promoToggle.classList.toggle("promo-toggle-active", state.promo.manualOverrideEnabled);
-  }
+
+  renderPromoStatus();
 }
 
 async function fetchPromoStatus() {
@@ -876,33 +903,9 @@ async function fetchPromoStatus() {
     renderPromoStatus();
   } catch (error) {
     console.error(error);
-    promoStatus.textContent = "PROMO 2x1: INACTIVA";
+    promoStatus.textContent = "Promo activa: Sin promo";
   }
 }
-
-async function togglePromoOverride() {
-  if (!promoToggle) return;
-  const nextEnabled = !(state.promo && state.promo.manualOverrideEnabled);
-  try {
-    const response = await fetch(apiUrl("/api/promo/override"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: nextEnabled })
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => null);
-      const message = data && data.error ? data.error : "No se pudo actualizar promo.";
-      alert(message);
-      return;
-    }
-    state.promo = await response.json();
-    renderPromoStatus();
-  } catch (error) {
-    console.error(error);
-    alert("No se pudo actualizar promo.");
-  }
-}
-
 function removeCartItem(id) {
   state.cart = state.cart.filter((item) => item.id !== id);
   renderCart();
@@ -957,9 +960,28 @@ function calculateTotals() {
     }
   }
   
+  const baseSubtotal = subtotal;
+  const baseTotal = promoDiscount > 0 ? Math.max(0, subtotal - promoDiscount) : subtotal;
+
+  if (selectedPromoId === "combo_viernes_169") {
+    const items = state.cart;
+    const hasRamen = items.some((i) => i.category === "ramen" || i.productId === "ramen_deku");
+    const hasTempura = items.some((i) => i.productId === "side_tempura" || i.productId === "side_tempura_3");
+    const hasDrink = items.some((i) => i.category === "bebidas" || i.category === "drinks" || i.productId === "drink_pepsi");
+
+    if (hasRamen && hasTempura && hasDrink) {
+      return {
+        subtotal: baseSubtotal,
+        total: 169,
+        promoApplied: true
+      };
+    }
+  }
+
   return {
-    subtotal,
-    total: promoDiscount > 0 ? Math.max(0, subtotal - promoDiscount) : subtotal
+    subtotal: baseSubtotal,
+    total: baseTotal,
+    promoApplied: false
   };
 }
 
@@ -1268,7 +1290,8 @@ async function sendOrder() {
   const payload = {
     items,
     totals,
-    table: tableSelect.value
+    table: tableSelect.value,
+    selectedPromoId: selectedPromoId
   };
   const note = state.note && state.note.trim() ? state.note.trim() : "";
   if (note) {
@@ -1290,11 +1313,13 @@ async function sendOrder() {
     state.note = "";
     state.noteDraft = "";
     state.noteEditing = false;
+    selectedPromoId = null;
     if (tableSelect) {
       tableSelect.value = "";
     }
     orderFlowStep = 0;
     renderCart();
+    renderPromoStatus();
     renderProducts();
     updateOrderFlowUI();
     setStatus("Orden enviada a cocina.");
@@ -2640,7 +2665,7 @@ if (cleanupTestOrdersButton) {
 }
 
 if (promoToggle) {
-  promoToggle.addEventListener("click", togglePromoOverride);
+  promoToggle.addEventListener("click", openPromoSelector);
 }
 
 function updateOrderFlowUI() {
