@@ -948,11 +948,7 @@ function openPromoSelector() {
     }
 
     if ((target.dataset && target.dataset.promo) || (target.dataset && target.dataset.clear === "true")) {
-      if (selectedPromoId === "2x1_jueves") {
-        await syncLegacyPromoOverride("2x1_jueves");
-      } else {
-        await syncLegacyPromoOverride(null);
-      }
+      await syncLegacyPromoOverride(selectedPromoId);
       closeModal();
       renderPromoStatus();
       renderCart();
@@ -982,16 +978,16 @@ function removeCartItem(id) {
   renderProducts();
 }
 
-async function syncLegacyPromoOverride(promoId) {
-  const enabled = promoId === "2x1_jueves";
+async function syncLegacyPromoOverride(selectedPromoId) {
   try {
-    await fetch(apiUrl("/api/promo/override"), {
+    const enabled = selectedPromoId === "2x1_jueves";
+    await fetch("/api/promo/override", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled })
     });
-  } catch (error) {
-    console.error("No se pudo sincronizar promo override", error);
+  } catch (err) {
+    console.error("Error syncing promo override", err);
   }
 }
 
