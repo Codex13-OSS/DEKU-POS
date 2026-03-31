@@ -1,5 +1,4 @@
 function applyPromotions(order, menu) {
-  const items = Array.isArray(order && order.items) ? order.items : [];
   const selectedPromoId = order && order.selectedPromoId;
 
   if (selectedPromoId !== 'combo_viernes_169') {
@@ -10,46 +9,50 @@ function applyPromotions(order, menu) {
     };
   }
 
-  const ramenMItems = items.filter((item) => item && item.productId === 'ramen_deku' && item.meta && item.meta.size === 'M');
-  const tempura3Items = items.filter((item) => item && item.productId === 'side_tempura_3');
-  const pepsiItems = items.filter((item) => item && item.productId === 'drink_pepsi');
+  const ramen = order.items.find((i) =>
+    i.productId === 'ramen_deku' &&
+    i.meta &&
+    i.meta.size === 'M'
+  );
 
-  function sumQty(list) {
-    return list.reduce((acc, i) => acc + (Number(i && i.qty) || 0), 0);
-  }
+  const tempura = order.items.find((i) =>
+    i.productId === 'side_tempura_3'
+  );
 
-  const qtyRamenM = sumQty(ramenMItems);
-  const qtyTempura3 = sumQty(tempura3Items);
-  const qtyPepsi = sumQty(pepsiItems);
+  const bebida = order.items.find((i) =>
+    i.productId === 'drink_pepsi'
+  );
 
-  const combos = Math.min(qtyRamenM, qtyTempura3, qtyPepsi);
+  const hasCombo = ramen && tempura && bebida;
 
-  if (combos === 0) {
+  if (!hasCombo) {
     return {
       promoApplied: false,
-      promoType: 'combo_viernes_169',
+      promoType: null,
       promoDiscount: 0
     };
   }
 
-  const getUnitPrice = (list) => {
-    const found = list.find((item) => Number.isFinite(Number(item && item.unitPrice)));
-    return found ? Number(found.unitPrice) : 0;
-  };
+  const subtotal = order.items.reduce((sum, item) => {
+    return sum + (item.unitPrice * item.qty);
+  }, 0);
 
-  const precioRamen = getUnitPrice(ramenMItems);
-  const precioTempura = getUnitPrice(tempura3Items);
-  const precioPepsi = getUnitPrice(pepsiItems);
+  const comboPrice = 169;
 
-  const precioNormalCombo = precioRamen + precioTempura + precioPepsi;
-  const precioPromo = 169;
-  const descuentoUnitario = Math.max(0, precioNormalCombo - precioPromo);
-  const promoDiscount = descuentoUnitario * combos;
+  const discount = subtotal - comboPrice;
+
+  if (discount <= 0) {
+    return {
+      promoApplied: false,
+      promoType: null,
+      promoDiscount: 0
+    };
+  }
 
   return {
     promoApplied: true,
     promoType: 'combo_viernes_169',
-    promoDiscount
+    promoDiscount: discount
   };
 }
 

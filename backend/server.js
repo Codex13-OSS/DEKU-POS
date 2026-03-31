@@ -6,6 +6,7 @@ const path = require("path");
 const http = require("http");
 const WebSocket = require("ws");
 const { shadowWriteOrder } = require("./db_shadow");
+const { applyPromotions } = require("./lib/promotionEngine");
 
 const app = express();
 const server = http.createServer(app);
@@ -891,7 +892,8 @@ app.post("/api/orders", (req, res) => {
     items: req.body.items.map((item) => normalizeIncomingItem(item, generateItemId())),
     totals,
     note,
-    notes: noteValue
+    notes: noteValue,
+    selectedPromoId: req.body.selectedPromoId
   };
   if (!order.sentToKitchenAt) {
     order.sentToKitchenAt = order.createdAt;
@@ -901,6 +903,28 @@ app.post("/api/orders", (req, res) => {
   order.promoSource = promoPayload.promoActive ? promoPayload.promoSource : null;
   order.promoDiscount = promoDiscount;
   order.promoTimestamp = now.toISOString();
+  const menu = loadMenu();
+  // === PROMO ENGINE (combo viernes) ===
+  if (order.selectedPromoId === 'combo_viernes_169') {
+    try {
+      const promoResult = applyPromotions(order, menu);
+
+      if (promoResult && promoResult.promoApplied) {
+        order.promoDiscount = promoResult.promoDiscount;
+        order.promoType = promoResult.promoType;
+
+        const subtotal =
+          order.totals?.subtotal ??
+          order.subtotal ??
+          order.total ??
+          0;
+
+        order.total = subtotal - promoResult.promoDiscount;
+      }
+    } catch (err) {
+      console.error('combo_viernes_169 error:', err);
+    }
+  }
   orders.push(order);
   saveOrders(orders);
   broadcast("order:new", order);
@@ -989,6 +1013,28 @@ app.post("/api/orders/:id/items", (req, res) => {
   order.promoSource = promoPayload.promoActive ? promoPayload.promoSource : null;
   order.promoDiscount = promoDiscount;
   order.promoTimestamp = now.toISOString();
+  const menu = loadMenu();
+  // === PROMO ENGINE (combo viernes) ===
+  if (order.selectedPromoId === 'combo_viernes_169') {
+    try {
+      const promoResult = applyPromotions(order, menu);
+
+      if (promoResult && promoResult.promoApplied) {
+        order.promoDiscount = promoResult.promoDiscount;
+        order.promoType = promoResult.promoType;
+
+        const subtotal =
+          order.totals?.subtotal ??
+          order.subtotal ??
+          order.total ??
+          0;
+
+        order.total = subtotal - promoResult.promoDiscount;
+      }
+    } catch (err) {
+      console.error('combo_viernes_169 error:', err);
+    }
+  }
 
   saveOrders(orders);
   broadcast("order:updated", order);
