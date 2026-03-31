@@ -6,7 +6,7 @@ const path = require("path");
 const http = require("http");
 const WebSocket = require("ws");
 const { shadowWriteOrder } = require("./db_shadow");
-const { applyPromotions } = require("./lib/promotionEngine");
+const { applyPromotions } = require('./lib/promotionEngine');
 
 const app = express();
 const server = http.createServer(app);
