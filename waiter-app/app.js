@@ -1029,17 +1029,22 @@ function calculateTotals() {
   const baseTotal = promoDiscount > 0 ? Math.max(0, subtotal - promoDiscount) : subtotal;
 
   if (selectedPromoId === "combo_viernes_169") {
-    const items = state.cart;
-    const hasRamen = items.some((i) => i.category === "ramen" || i.productId === "ramen_deku");
-    const hasTempura = items.some((i) => i.productId === "side_tempura" || i.productId === "side_tempura_3");
-    const hasDrink = items.some((i) => i.category === "bebidas" || i.category === "drinks" || i.productId === "drink_pepsi");
+    const ramen = state.cart.find((i) => i && (i.category === "ramen" || i.productId === "ramen_deku"));
+    const tempura = state.cart.find((i) => i && (i.productId === "side_tempura" || i.productId === "side_tempura_3"));
+    const bebida = state.cart.find((i) => i && (i.category === "bebidas" || i.category === "drinks" || i.productId === "drink_pepsi"));
 
-    if (hasRamen && hasTempura && hasDrink) {
-      return {
-        subtotal: baseSubtotal,
-        total: 169,
-        promoApplied: true
-      };
+    if (ramen && tempura && bebida) {
+      const comboBase = 169;
+      const comboItemsTotal = Number(ramen.unitPrice || 0) + Number(tempura.unitPrice || 0) + Number(bebida.unitPrice || 0);
+      const discount = comboItemsTotal - comboBase;
+
+      if (discount > 0) {
+        return {
+          subtotal: baseSubtotal,
+          total: Math.max(0, baseTotal - discount),
+          promoApplied: true
+        };
+      }
     }
   }
 
@@ -1358,6 +1363,11 @@ async function sendOrder() {
     table: tableSelect.value,
     selectedPromoId: selectedPromoId
   };
+  if (selectedPromoId === "2x1_jueves") {
+    payload.promoOverride = true;
+    payload.promoType = "2x1_jueves";
+  }
+
   const note = state.note && state.note.trim() ? state.note.trim() : "";
   if (note) {
     payload.note = note;
