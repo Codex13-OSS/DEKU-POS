@@ -81,6 +81,12 @@
       "image": "side_tempura.png"
     },
     {
+      "id": "side_tempura_3",
+      "name": "Camarones Tempura (3 pzas)",
+      "category": "sides",
+      "price": 50
+    },
+    {
       "id": "side_gyozas",
       "name": "Gyozas (5 pzas)",
       "category": "sides",
