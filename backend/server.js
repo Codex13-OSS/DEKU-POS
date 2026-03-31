@@ -873,8 +873,6 @@ app.post("/api/orders", (req, res) => {
   const now = new Date();
   const promoState = loadPromoState();
   const promoPayload = buildPromoPayload(promoState, now);
-  const promoDiscount = calculatePromoDiscount(req.body.items);
-  const promoApplied = promoPayload.promoActive && promoDiscount > 0;
   const totals = req.body.totals;
   const noteValue = typeof req.body.note === "string"
     ? req.body.note.trim()
@@ -898,11 +896,28 @@ app.post("/api/orders", (req, res) => {
   if (!order.sentToKitchenAt) {
     order.sentToKitchenAt = order.createdAt;
   }
-  order.promoApplied = promoApplied;
-  order.promoType = "2x1_jueves";
-  order.promoSource = promoPayload.promoActive ? promoPayload.promoSource : null;
-  order.promoDiscount = promoDiscount;
+  order.promoApplied = false;
+  order.promoType = null;
+  order.promoSource = null;
+  order.promoDiscount = 0;
   order.promoTimestamp = now.toISOString();
+
+  if (!order.selectedPromoId || order.selectedPromoId === "2x1_jueves") {
+    const promoDiscount = calculatePromoDiscount(req.body.items);
+    const promoApplied = promoPayload.promoActive && promoDiscount > 0;
+    const subtotal =
+      order.totals?.subtotal ??
+      order.subtotal ??
+      order.total ??
+      0;
+    if (!order.totals) order.totals = {};
+    order.totals.total = promoApplied ? Math.max(0, subtotal - promoDiscount) : subtotal;
+    order.promoApplied = promoApplied;
+    order.promoType = promoApplied ? "2x1_jueves" : null;
+    order.promoSource = promoApplied ? promoPayload.promoSource : null;
+    order.promoDiscount = promoApplied ? promoDiscount : 0;
+  }
+
   const menu = loadMenu();
   // === PROMO ENGINE (combo viernes) ===
   if (order.selectedPromoId === 'combo_viernes_169') {
@@ -912,14 +927,18 @@ app.post("/api/orders", (req, res) => {
       if (promoResult && promoResult.promoApplied) {
         order.promoDiscount = promoResult.promoDiscount;
         order.promoType = promoResult.promoType;
+        order.promoApplied = true;
+        order.promoSource = null;
 
         const subtotal =
           order.totals?.subtotal ??
           order.subtotal ??
           order.total ??
           0;
-
-        order.total = subtotal - promoResult.promoDiscount;
+        const finalTotal = Math.max(0, subtotal - promoResult.promoDiscount);
+        if (!order.totals) order.totals = {};
+        order.totals.total = finalTotal;
+        order.total = finalTotal;
       }
     } catch (err) {
       console.error('combo_viernes_169 error:', err);
@@ -1001,18 +1020,26 @@ app.post("/api/orders/:id/items", (req, res) => {
   const now = new Date();
   const promoState = loadPromoState();
   const promoPayload = buildPromoPayload(promoState, now);
-  const promoDiscount = calculatePromoDiscount(order.items);
-  const promoApplied = promoPayload.promoActive && promoDiscount > 0;
-
   order.totals = {
     subtotal,
-    total: promoApplied ? Math.max(0, subtotal - promoDiscount) : subtotal
+    total: subtotal
   };
-  order.promoApplied = promoApplied;
-  order.promoType = "2x1_jueves";
-  order.promoSource = promoPayload.promoActive ? promoPayload.promoSource : null;
-  order.promoDiscount = promoDiscount;
+  order.promoApplied = false;
+  order.promoType = null;
+  order.promoSource = null;
+  order.promoDiscount = 0;
   order.promoTimestamp = now.toISOString();
+
+  if (!order.selectedPromoId || order.selectedPromoId === "2x1_jueves") {
+    const promoDiscount = calculatePromoDiscount(order.items);
+    const promoApplied = promoPayload.promoActive && promoDiscount > 0;
+    order.totals.total = promoApplied ? Math.max(0, subtotal - promoDiscount) : subtotal;
+    order.promoApplied = promoApplied;
+    order.promoType = promoApplied ? "2x1_jueves" : null;
+    order.promoSource = promoApplied ? promoPayload.promoSource : null;
+    order.promoDiscount = promoApplied ? promoDiscount : 0;
+  }
+
   const menu = loadMenu();
   // === PROMO ENGINE (combo viernes) ===
   if (order.selectedPromoId === 'combo_viernes_169') {
@@ -1022,14 +1049,18 @@ app.post("/api/orders/:id/items", (req, res) => {
       if (promoResult && promoResult.promoApplied) {
         order.promoDiscount = promoResult.promoDiscount;
         order.promoType = promoResult.promoType;
+        order.promoApplied = true;
+        order.promoSource = null;
 
         const subtotal =
           order.totals?.subtotal ??
           order.subtotal ??
           order.total ??
           0;
-
-        order.total = subtotal - promoResult.promoDiscount;
+        const finalTotal = Math.max(0, subtotal - promoResult.promoDiscount);
+        if (!order.totals) order.totals = {};
+        order.totals.total = finalTotal;
+        order.total = finalTotal;
       }
     } catch (err) {
       console.error('combo_viernes_169 error:', err);
