@@ -725,6 +725,13 @@ function renderCart() {
   const totals = calculateTotals();
   subtotalEl.textContent = formatPrice(totals.subtotal);
   totalEl.textContent = formatPrice(totals.total);
+  if (promoStatus) {
+    if (totals.promoApplied && selectedPromoId === "combo_viernes_169") {
+      promoStatus.textContent = "Promo aplicada: Combo viernes 169";
+    } else {
+      renderPromoStatus();
+    }
+  }
 }
 
 function resetLocalTicketState() {
@@ -953,9 +960,28 @@ function calculateTotals() {
     }
   }
   
+  const baseSubtotal = subtotal;
+  const baseTotal = promoDiscount > 0 ? Math.max(0, subtotal - promoDiscount) : subtotal;
+
+  if (selectedPromoId === "combo_viernes_169") {
+    const items = state.cart;
+    const hasRamen = items.some((i) => i.category === "ramen" || i.productId === "ramen_deku");
+    const hasTempura = items.some((i) => i.productId === "side_tempura" || i.productId === "side_tempura_3");
+    const hasDrink = items.some((i) => i.category === "bebidas" || i.category === "drinks" || i.productId === "drink_pepsi");
+
+    if (hasRamen && hasTempura && hasDrink) {
+      return {
+        subtotal: baseSubtotal,
+        total: 169,
+        promoApplied: true
+      };
+    }
+  }
+
   return {
-    subtotal,
-    total: promoDiscount > 0 ? Math.max(0, subtotal - promoDiscount) : subtotal
+    subtotal: baseSubtotal,
+    total: baseTotal,
+    promoApplied: false
   };
 }
 
