@@ -5,54 +5,75 @@ function applyPromotions(order, menu) {
     return {
       promoApplied: false,
       promoType: null,
-      promoDiscount: 0
+      promoDiscount: 0,
+      comboSets: 0
     };
   }
 
-  const ramen = order.items.find((i) =>
-    i.productId === 'ramen_deku' &&
-    i.meta &&
-    i.meta.size === 'M'
+  const expandedItems = [];
+  (order.items || []).forEach((item) => {
+    const qty = Number(item && item.qty);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return;
+    }
+    for (let i = 0; i < qty; i += 1) {
+      expandedItems.push(item);
+    }
+  });
+
+  const ramenM = expandedItems.filter((item) =>
+    item &&
+    item.productId === 'ramen_deku' &&
+    item.meta &&
+    item.meta.size === 'M'
+  );
+  const tempura3 = expandedItems.filter((item) =>
+    item &&
+    item.productId === 'side_tempura_3'
+  );
+  const pepsi = expandedItems.filter((item) =>
+    item &&
+    item.productId === 'drink_pepsi'
   );
 
-  const tempura = order.items.find((i) =>
-    i.productId === 'side_tempura_3'
-  );
+  const sets = Math.min(ramenM.length, tempura3.length, pepsi.length);
 
-  const bebida = order.items.find((i) =>
-    i.productId === 'drink_pepsi'
-  );
-
-  const hasCombo = ramen && tempura && bebida;
-
-  if (!hasCombo) {
+  if (!sets) {
     return {
       promoApplied: false,
       promoType: null,
-      promoDiscount: 0
+      promoDiscount: 0,
+      comboSets: 0
     };
   }
 
-  const subtotal = order.items.reduce((sum, item) => {
-    return sum + (item.unitPrice * item.qty);
-  }, 0);
-
-  const comboPrice = 169;
-
-  const discount = subtotal - comboPrice;
+  const ramenBaseTotal = ramenM
+    .slice(0, sets)
+    .reduce((sum, item) => sum + (Number(item.basePrice) || 0), 0);
+  const tempuraTotal = tempura3
+    .slice(0, sets)
+    .reduce((sum, item) => sum + (Number(item.unitPrice) || 0), 0);
+  const pepsiTotal = pepsi
+    .slice(0, sets)
+    .reduce((sum, item) => sum + (Number(item.unitPrice) || 0), 0);
+  const comboBaseTotal = ramenBaseTotal + tempuraTotal + pepsiTotal;
+  const promoPriceTotal = sets * 169;
+  const discount = comboBaseTotal - promoPriceTotal;
 
   if (discount <= 0) {
     return {
       promoApplied: false,
       promoType: null,
-      promoDiscount: 0
+      promoDiscount: 0,
+      comboSets: 0
     };
   }
 
   return {
     promoApplied: true,
     promoType: 'combo_viernes_169',
-    promoDiscount: discount
+    promoDiscount: discount,
+    comboSets: sets
   };
 }
 
