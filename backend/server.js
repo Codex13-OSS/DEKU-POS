@@ -871,8 +871,6 @@ app.post("/api/orders", (req, res) => {
   }
 
   const now = new Date();
-  const promoState = loadPromoState();
-  const promoPayload = buildPromoPayload(promoState, now);
   const totals = req.body.totals;
   const noteValue = typeof req.body.note === "string"
     ? req.body.note.trim()
@@ -902,9 +900,9 @@ app.post("/api/orders", (req, res) => {
   order.promoDiscount = 0;
   order.promoTimestamp = now.toISOString();
 
-  if (!order.selectedPromoId || order.selectedPromoId === "2x1_jueves") {
+  if (order.selectedPromoId === "2x1_jueves") {
     const promoDiscount = calculatePromoDiscount(req.body.items);
-    const promoApplied = promoPayload.promoActive && promoDiscount > 0;
+    const promoApplied = promoDiscount > 0;
     const subtotal =
       order.totals?.subtotal ??
       order.subtotal ??
@@ -914,7 +912,7 @@ app.post("/api/orders", (req, res) => {
     order.totals.total = promoApplied ? Math.max(0, subtotal - promoDiscount) : subtotal;
     order.promoApplied = promoApplied;
     order.promoType = promoApplied ? "2x1_jueves" : null;
-    order.promoSource = promoApplied ? promoPayload.promoSource : null;
+    order.promoSource = promoApplied ? "selected_promo" : null;
     order.promoDiscount = promoApplied ? promoDiscount : 0;
   }
 
@@ -1018,8 +1016,6 @@ app.post("/api/orders/:id/items", (req, res) => {
   }, 0);
 
   const now = new Date();
-  const promoState = loadPromoState();
-  const promoPayload = buildPromoPayload(promoState, now);
   order.totals = {
     subtotal,
     total: subtotal
@@ -1030,13 +1026,13 @@ app.post("/api/orders/:id/items", (req, res) => {
   order.promoDiscount = 0;
   order.promoTimestamp = now.toISOString();
 
-  if (!order.selectedPromoId || order.selectedPromoId === "2x1_jueves") {
+  if (order.selectedPromoId === "2x1_jueves") {
     const promoDiscount = calculatePromoDiscount(order.items);
-    const promoApplied = promoPayload.promoActive && promoDiscount > 0;
+    const promoApplied = promoDiscount > 0;
     order.totals.total = promoApplied ? Math.max(0, subtotal - promoDiscount) : subtotal;
     order.promoApplied = promoApplied;
     order.promoType = promoApplied ? "2x1_jueves" : null;
-    order.promoSource = promoApplied ? promoPayload.promoSource : null;
+    order.promoSource = promoApplied ? "selected_promo" : null;
     order.promoDiscount = promoApplied ? promoDiscount : 0;
   }
 
