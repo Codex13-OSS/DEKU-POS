@@ -508,6 +508,7 @@ function adjustCartItem(productId, delta) {
         });
       }
 
+      calculateTotals();
       renderProducts();
       renderCart();
     };
@@ -550,6 +551,7 @@ function adjustCartItem(productId, delta) {
       const adjustment = product.price * appliedDelta;
       const minPrice = typeof targetRamen.basePrice === "number" ? targetRamen.basePrice : 0;
       targetRamen.unitPrice = Math.max(minPrice, targetRamen.unitPrice + adjustment);
+      calculateTotals();
       renderCart();
       renderProducts();
     };
@@ -585,6 +587,7 @@ function adjustCartItem(productId, delta) {
     }
   }
 
+  calculateTotals();
   renderProducts();
   renderCart();
 }
@@ -598,6 +601,7 @@ function adjustCartLineItem(itemId, delta) {
   if (item.qty <= 0) {
     state.cart = state.cart.filter((entry) => entry.id !== itemId);
   }
+  calculateTotals();
   renderProducts();
   renderCart();
 }
@@ -938,13 +942,22 @@ function openPromoSelector() {
   box.addEventListener("click", async (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
+    let promoChanged = false;
 
     if (target.dataset && target.dataset.promo) {
       selectedPromoId = target.dataset.promo;
+      promoChanged = true;
     }
 
     if (target.dataset && target.dataset.clear === "true") {
       selectedPromoId = null;
+      promoChanged = true;
+    }
+
+    if (promoChanged) {
+      calculateTotals();
+      renderCart();
+      renderPromoStatus();
     }
 
     if ((target.dataset && target.dataset.promo) || (target.dataset && target.dataset.clear === "true")) {
@@ -974,6 +987,7 @@ async function fetchPromoStatus() {
 }
 function removeCartItem(id) {
   state.cart = state.cart.filter((item) => item.id !== id);
+  calculateTotals();
   renderCart();
   renderProducts();
 }
@@ -1323,6 +1337,7 @@ function addRamenToCart() {
     }
   });
 
+  calculateTotals();
   renderCart();
 }
 
