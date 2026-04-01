@@ -961,6 +961,7 @@ function openPromoSelector() {
     }
 
     if ((target.dataset && target.dataset.promo) || (target.dataset && target.dataset.clear === "true")) {
+      await syncLegacyPromoOverride(selectedPromoId);
       closeModal();
       renderPromoStatus();
       renderCart();
@@ -989,6 +990,19 @@ function removeCartItem(id) {
   calculateTotals();
   renderCart();
   renderProducts();
+}
+
+async function syncLegacyPromoOverride(selectedPromoId) {
+  try {
+    const enabled = selectedPromoId === "2x1_jueves";
+    await fetch("/api/promo/override", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled })
+    });
+  } catch (err) {
+    console.error("Error syncing promo override", err);
+  }
 }
 
 function calculateTotals() {
@@ -1439,6 +1453,7 @@ async function sendOrder() {
     state.noteDraft = "";
     state.noteEditing = false;
     selectedPromoId = null;
+    await syncLegacyPromoOverride(null);
     if (tableSelect) {
       tableSelect.value = "";
     }
