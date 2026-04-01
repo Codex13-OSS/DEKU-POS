@@ -47,10 +47,18 @@ function applyPromotions(order, menu) {
     };
   }
 
-  const comboItemsTotal = [...ramenM.slice(0, sets), ...tempura3.slice(0, sets), ...pepsi.slice(0, sets)]
+  const ramenBaseTotal = ramenM
+    .slice(0, sets)
+    .reduce((sum, item) => sum + (Number(item.basePrice) || 0), 0);
+  const tempuraTotal = tempura3
+    .slice(0, sets)
     .reduce((sum, item) => sum + (Number(item.unitPrice) || 0), 0);
+  const pepsiTotal = pepsi
+    .slice(0, sets)
+    .reduce((sum, item) => sum + (Number(item.unitPrice) || 0), 0);
+  const comboBaseTotal = ramenBaseTotal + tempuraTotal + pepsiTotal;
   const promoPriceTotal = sets * 169;
-  const discount = comboItemsTotal - promoPriceTotal;
+  const discount = comboBaseTotal - promoPriceTotal;
 
   if (discount <= 0) {
     return {

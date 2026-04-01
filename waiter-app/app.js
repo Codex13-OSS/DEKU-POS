@@ -1028,9 +1028,17 @@ function calculateTotals() {
       };
     }
 
-    const comboItemsTotal = [...ramenM.slice(0, sets), ...tempura3.slice(0, sets), ...pepsi.slice(0, sets)]
+    const ramenBaseTotal = ramenM
+      .slice(0, sets)
+      .reduce((sum, item) => sum + (Number(item.basePrice) || 0), 0);
+    const tempuraTotal = tempura3
+      .slice(0, sets)
       .reduce((sum, item) => sum + (Number(item.unitPrice) || 0), 0);
-    const promoDiscount = comboItemsTotal - (sets * 169);
+    const pepsiTotal = pepsi
+      .slice(0, sets)
+      .reduce((sum, item) => sum + (Number(item.unitPrice) || 0), 0);
+    const comboBaseTotal = ramenBaseTotal + tempuraTotal + pepsiTotal;
+    const promoDiscount = comboBaseTotal - (sets * 169);
     if (promoDiscount <= 0) {
       return {
         subtotal,
